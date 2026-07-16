@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toBlob } from "html-to-image";
 import Image from "next/image";
+import Link from "next/link";
 import {
   type FormEvent,
   type ReactNode,
@@ -1499,6 +1500,15 @@ export function TarotApp() {
               </div>
               <p className="settings-note">{t.savedLanguageNote}</p>
             </section>
+            <nav className="settings-legal" aria-label={t.legalInformation}>
+              <Link
+                href={language === "ko" ? "/privacy" : "/privacy#english-summary"}
+                onClick={() => setSettingsOpen(false)}
+              >
+                <span>{t.privacyPolicy}</span>
+                <b aria-hidden="true">→</b>
+              </Link>
+            </nav>
           </aside>
         </div>
       ) : null}

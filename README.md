@@ -9,6 +9,12 @@
 
 정적 화면과 같은 출처의 API를 하나의 Cloudflare Worker로 배포했습니다. 질문 구성과 카드 해석은 Workers AI, 익명 세션의 사용량 카운터는 D1을 사용합니다.
 
+## 문서
+
+- [사이트 구조와 데이터 흐름](./SITE_STRUCTURE.md)
+- [기획 및 결정 기록](./PROJECT_PLAN.md)
+- [개인정보 처리방침](https://tarot-milktea.cha-amu.workers.dev/privacy)
+
 ## 로컬 실행
 
 Node.js 22 LTS(22.13 이상) 또는 24 이상을 권장합니다. Node.js 23에서도 빌드는 되지만 일부 개발 도구가 엔진 경고를 표시합니다.
