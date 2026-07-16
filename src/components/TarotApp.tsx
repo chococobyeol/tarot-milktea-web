@@ -260,8 +260,14 @@ function GameDialog({
   actions?: ReactNode;
   compact?: boolean;
 }) {
+  const dialogClassName = [
+    "game-dialog",
+    compact ? "compact" : "",
+    actions ? "has-actions" : "message-only",
+  ].filter(Boolean).join(" ");
+
   return (
-    <section className={compact ? "game-dialog compact" : "game-dialog"} aria-live="polite">
+    <section className={dialogClassName} aria-live="polite">
       <div className="dialog-copy">
         <span className="dialog-system-mark">TM</span>
         <div>
@@ -944,9 +950,9 @@ export function TarotApp() {
           ))}
         </ol>
         <div className="topbar-actions">
-          <button type="button" onClick={openHistory}><History size={17} /><span>{t.history}</span></button>
-          <button type="button" onClick={() => setSettingsOpen(true)}><Settings size={17} /><span>{t.settings}</span></button>
-          {phase !== "question" ? <button type="button" onClick={resetReading}><RotateCcw size={17} /><span>{t.newQuestion}</span></button> : null}
+          <button type="button" onClick={openHistory} aria-label={t.history}><History size={17} /><span>{t.history}</span></button>
+          <button type="button" onClick={() => setSettingsOpen(true)} aria-label={t.settings}><Settings size={17} /><span>{t.settings}</span></button>
+          {phase !== "question" ? <button type="button" onClick={resetReading} aria-label={t.newQuestion}><RotateCcw size={17} /><span>{t.newQuestion}</span></button> : null}
         </div>
       </header> : null}
 
@@ -1212,7 +1218,14 @@ export function TarotApp() {
         {phase === "interpreting" ? (
           <section className="game-scene loading-scene">
             <div className="scene-center interpreting-center">
-              {selectedOrders.map((order, index) => <span key={order} style={{ "--selected-index": index } as React.CSSProperties}><CardBack /></span>)}
+              {selectedOrders.map((order, index) => (
+                <span
+                  key={order}
+                  style={{ "--selected-angle": `${(index - (selectedOrders.length - 1) / 2) * 4}deg` } as React.CSSProperties}
+                >
+                  <CardBack />
+                </span>
+              ))}
               <LoaderCircle className="analysis-spinner" size={36} />
             </div>
             <GameDialog title={t.interpreting}>
