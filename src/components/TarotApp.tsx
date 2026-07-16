@@ -1377,7 +1377,7 @@ export function TarotApp() {
                   <p>{nickname ? `${nickname} / ` : ""}{round === 0 ? "INITIAL READING" : `FOLLOW-UP ${round}`}</p>
                   <h1>{round === 0 ? question : activeQuestion}</h1>
                 </div>
-                <span>{apiMode === "ai" ? "WORKERS AI" : "LOCAL MODE"}</span>
+                <span>READING RESULT</span>
               </header>
               <nav className="console-tabs" aria-label={t.tabsAria}>
                 <button className={resultView === "summary" ? "active" : ""} type="button" onClick={() => setResultView("summary")}>{t.summary}</button>

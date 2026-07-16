@@ -46,6 +46,7 @@ test("production client includes the Turnstile site key without a local-mode lab
 
   assert.match(clientSource, /0x4AAAAAAD3E3F2jPclDupGH/);
   assert.doesNotMatch(clientSource, /로컬 보호 모드/);
+  assert.doesNotMatch(clientSource, /LOCAL MODE/);
 });
 
 test("server-renders the privacy policy page", async () => {
