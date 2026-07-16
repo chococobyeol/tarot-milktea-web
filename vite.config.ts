@@ -5,6 +5,9 @@ import { sites } from "./build/sites-vite-plugin";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
+// Turnstile site keys are public and are shipped to every browser. The secret
+// key remains in Cloudflare Worker secrets and is never included in this build.
+const PRODUCTION_TURNSTILE_SITE_KEY = "0x4AAAAAAD3E3F2jPclDupGH";
 
 const { d1, r2 } = hostingConfig;
 
@@ -37,7 +40,7 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ mode }) => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -46,8 +49,13 @@ export default defineConfig(async () => {
 
   // Wrangler snapshots its log path while the Cloudflare plugin is imported.
   const { cloudflare } = await import("@cloudflare/vite-plugin");
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim()
+    || (mode === "production" ? PRODUCTION_TURNSTILE_SITE_KEY : "");
 
   return {
+    define: {
+      "process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY": JSON.stringify(turnstileSiteKey),
+    },
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,

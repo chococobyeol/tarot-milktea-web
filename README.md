@@ -36,11 +36,11 @@ npm run db:generate
 - D1 바인딩: `DB`
 - 비밀값 `SESSION_SECRET`: 충분히 긴 무작위 문자열
 - 비밀값 `TURNSTILE_SECRET`: Turnstile secret key
-- 공개 환경값 `NEXT_PUBLIC_TURNSTILE_SITE_KEY`: Turnstile site key
+- 공개 빌드값 `NEXT_PUBLIC_TURNSTILE_SITE_KEY`: `vite.config.ts`의 운영 Turnstile site key (환경값으로 재정의 가능)
 - Rate Limiting 바인딩 `SESSION_RATE_LIMITER`: 세션 기준 분당 10회
 - Rate Limiting 바인딩 `NETWORK_RATE_LIMITER`: 네트워크 기준 분당 30회
 
-`SESSION_SECRET`과 `TURNSTILE_SECRET`은 Cloudflare의 암호화된 Worker secret으로만 저장합니다. 계정 식별자와 로컬 배포 설정도 저장소에 넣지 않으며 `.wrangler/` 전체를 Git에서 제외합니다. 운영 상태와 검증 기록은 `PROJECT_PLAN.md`에 정리합니다.
+Turnstile site key는 브라우저에 공개되는 식별자이므로 빌드 설정에 포함합니다. `SESSION_SECRET`과 `TURNSTILE_SECRET`은 Cloudflare의 암호화된 Worker secret으로만 저장합니다. 계정 식별자와 로컬 배포 설정도 저장소에 넣지 않으며 `.wrangler/` 전체를 Git에서 제외합니다. 운영 상태와 검증 기록은 `PROJECT_PLAN.md`에 정리합니다.
 
 ## 데이터와 저장 범위
 

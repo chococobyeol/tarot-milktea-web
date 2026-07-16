@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render(pathname = "/") {
@@ -24,6 +25,7 @@ test("server-renders the Korean tarot title page", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/i);
 
   const html = await response.text();
   assert.match(html, /<html lang="ko">/);
@@ -33,4 +35,15 @@ test("server-renders the Korean tarot title page", async () => {
   assert.match(html, /value="ㅇㅁ"/);
   assert.match(html, /타로 시작/);
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton|codex-preview/);
+});
+
+test("production client includes the Turnstile site key without a local-mode label", async () => {
+  const assetDirectory = new URL("../dist/client/assets/", import.meta.url);
+  const filenames = (await readdir(assetDirectory)).filter((filename) => filename.endsWith(".js"));
+  const clientSource = (await Promise.all(
+    filenames.map((filename) => readFile(new URL(filename, assetDirectory), "utf8")),
+  )).join("\n");
+
+  assert.match(clientSource, /0x4AAAAAAD3E3F2jPclDupGH/);
+  assert.doesNotMatch(clientSource, /로컬 보호 모드/);
 });

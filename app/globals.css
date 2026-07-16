@@ -948,8 +948,7 @@ img {
   min-height: 0;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow: visible;
 }
 
 .dialog-question-form {
@@ -962,6 +961,7 @@ img {
 .followup-console textarea {
   width: 100%;
   min-height: 64px;
+  max-height: 160px;
   padding: 10px 12px;
   border: 1px solid #55555a;
   border-radius: 3px;
@@ -970,6 +970,7 @@ img {
   color: #fff;
   font-size: 16px;
   line-height: 1.4;
+  overflow-y: hidden;
   resize: none;
 }
 
@@ -1071,10 +1072,30 @@ img {
   font-size: 10px;
 }
 
+.turnstile-gate {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 300px;
+  align-items: center;
+  gap: 8px;
+}
+
 .turnstile-slot {
-  min-width: min(300px, 100%);
-  min-height: 65px;
+  width: min(300px, 100%);
+  min-width: 0;
   flex: 0 1 300px;
+}
+
+.protection-error {
+  color: #8d221d;
+}
+
+@media (max-height: 560px) and (min-width: 761px) {
+  .question-scene .game-dialog {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 .game-error {

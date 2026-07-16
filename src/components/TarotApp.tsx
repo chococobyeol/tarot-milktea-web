@@ -31,7 +31,7 @@ import {
 } from "react";
 
 import { RadarChart, SignalDistribution } from "@/src/components/ReadingCharts";
-import { TurnstileGate } from "@/src/components/TurnstileGate";
+import { TurnstileGate, type TurnstileStatus } from "@/src/components/TurnstileGate";
 import { QUESTION_EXAMPLES, UI_TEXT, type AppLanguage } from "@/src/lib/i18n";
 import {
   ensureAnonymousSession,
@@ -387,6 +387,16 @@ function holdStage(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function fitTextarea(element: HTMLTextAreaElement | null): void {
+  if (!element) return;
+  element.style.height = "auto";
+  const maxHeight = Number.parseFloat(window.getComputedStyle(element).maxHeight) || 160;
+  const borderHeight = element.offsetHeight - element.clientHeight;
+  const naturalHeight = element.scrollHeight + borderHeight;
+  element.style.height = `${Math.min(naturalHeight, maxHeight)}px`;
+  element.style.overflowY = naturalHeight > maxHeight ? "auto" : "hidden";
+}
+
 export function TarotApp() {
   const [phase, setPhase] = useState<Phase>("home");
   const [nickname, setNickname] = useState("ㅇㅁ");
@@ -408,6 +418,7 @@ export function TarotApp() {
   const [recordId, setRecordId] = useState(createRecordId);
   const [apiMode, setApiMode] = useState<ApiMode>("local");
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus>("loading");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [imageExporting, setImageExporting] = useState(false);
@@ -424,6 +435,7 @@ export function TarotApp() {
   const resultRef = useRef<HTMLElement>(null);
   const exportRef = useRef<HTMLElement>(null);
   const questionInputRef = useRef<HTMLTextAreaElement>(null);
+  const followupInputRef = useRef<HTMLTextAreaElement>(null);
   const noticeIdRef = useRef(0);
   const t = UI_TEXT[language];
 
@@ -433,7 +445,9 @@ export function TarotApp() {
   }, []);
 
   const handleTurnstileToken = useCallback((token: string) => setTurnstileToken(token), []);
+  const handleTurnstileStatus = useCallback((status: TurnstileStatus) => setTurnstileStatus(status), []);
   const handleSessionRefreshToken = useCallback(async (token: string) => {
+    if (!token) return;
     try {
       await ensureAnonymousSession(token);
       setSessionRefreshNeeded(false);
@@ -556,6 +570,14 @@ export function TarotApp() {
   }, [notice]);
 
   useEffect(() => {
+    if (phase === "question") fitTextarea(questionInputRef.current);
+  }, [phase, question]);
+
+  useEffect(() => {
+    if (followupOpen) fitTextarea(followupInputRef.current);
+  }, [followupOpen, followupQuestion]);
+
+  useEffect(() => {
     if (!imageExporting || !result || !exportRef.current) return;
     let cancelled = false;
     let objectUrl = "";
@@ -617,6 +639,10 @@ export function TarotApp() {
       setError(language === "ko" ? "질문을 5자 이상 입력하세요." : "Enter at least 5 characters.");
       return;
     }
+    if (turnstileStatus !== "disabled" && (!turnstileToken || turnstileStatus !== "ready")) {
+      setError(turnstileStatus === "error" ? t.botCheckError : t.botCheckLoading);
+      return;
+    }
     setError("");
     setNotice(null);
     setPhase("planning");
@@ -634,6 +660,8 @@ export function TarotApp() {
       setPhase("plan");
     } catch (requestError) {
       await minimumPlanningTime;
+      setTurnstileToken("");
+      setTurnstileStatus("loading");
       setError(userError(requestError, language));
       setPhase("question");
     }
@@ -642,6 +670,8 @@ export function TarotApp() {
   function beginReading(event: FormEvent) {
     event.preventDefault();
     setNickname(nickname.trim().slice(0, 20) || "ㅇㅁ");
+    setTurnstileToken("");
+    setTurnstileStatus("loading");
     setPhase("question");
   }
 
@@ -654,6 +684,8 @@ export function TarotApp() {
 
   function cancelPlan() {
     if (round === 0) {
+      setTurnstileToken("");
+      setTurnstileStatus("loading");
       setPhase("question");
       return;
     }
@@ -794,6 +826,8 @@ export function TarotApp() {
     setRecordId(createRecordId());
     setError("");
     setNotice(null);
+    setTurnstileToken("");
+    setTurnstileStatus("loading");
     setExamplesOpen(false);
     setFollowupOpen(false);
     setResultView("summary");
@@ -920,7 +954,12 @@ export function TarotApp() {
         {sessionRefreshNeeded ? (
           <aside className="session-refresh" role="alert">
             <p>{t.sessionExpired}</p>
-            <TurnstileGate onToken={handleSessionRefreshToken} />
+            <TurnstileGate
+              onToken={handleSessionRefreshToken}
+              loadingLabel={t.botCheckLoading}
+              errorLabel={t.botCheckError}
+              ariaLabel={t.botCheckAria}
+            />
           </aside>
         ) : null}
 
@@ -1007,8 +1046,21 @@ export function TarotApp() {
                 ) : null}
                 {error ? <p className="game-error" role="alert">{error}</p> : null}
                 <div className="question-submit-row">
-                  <TurnstileGate onToken={handleTurnstileToken} />
-                  <button className="game-button primary" type="submit">{t.begin}<ChevronRight size={18} /></button>
+                  <TurnstileGate
+                    onToken={handleTurnstileToken}
+                    onStatusChange={handleTurnstileStatus}
+                    loadingLabel={t.botCheckLoading}
+                    errorLabel={t.botCheckError}
+                    ariaLabel={t.botCheckAria}
+                  />
+                  <button
+                    className="game-button primary"
+                    type="submit"
+                    disabled={turnstileStatus === "loading" || turnstileStatus === "error"}
+                    aria-busy={turnstileStatus === "loading"}
+                  >
+                    {t.begin}<ChevronRight size={18} />
+                  </button>
                 </div>
               </form>
             </GameDialog>
@@ -1368,7 +1420,7 @@ export function TarotApp() {
                   <p className="console-kicker">FOLLOW-UP {followups.length + 1} / 2</p>
                   <h2 id="followup-title">{t.followupTitle}</h2>
                   <p>{t.followupDescription}</p>
-                  <textarea value={followupQuestion} onChange={(event) => setFollowupQuestion(event.target.value.slice(0, 300))} placeholder={t.followupPlaceholder} minLength={5} maxLength={300} autoFocus />
+                  <textarea ref={followupInputRef} value={followupQuestion} onChange={(event) => setFollowupQuestion(event.target.value.slice(0, 300))} placeholder={t.followupPlaceholder} minLength={5} maxLength={300} autoFocus />
                   {error ? <p className="game-error" role="alert">{error}</p> : null}
                   <div className="dialog-actions"><button className="game-button" type="button" onClick={() => setFollowupOpen(false)}>{t.cancel}</button><button className="game-button primary" type="submit">{t.addCardPlan}<ChevronRight size={17} /></button></div>
                 </form>
