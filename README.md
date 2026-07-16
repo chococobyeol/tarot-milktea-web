@@ -2,6 +2,13 @@
 
 질문에 따라 1~5장의 카드와 자리 역할을 구성하고, 사용자가 직접 선택한 카드의 관계를 AI가 분석하는 웹 타로 앱입니다. 최초 질문 뒤에는 최대 2회의 추가 질문을 지원합니다.
 
+## 공개 사이트
+
+- 앱: [https://tarot-milktea.yiyaaang.workers.dev](https://tarot-milktea.yiyaaang.workers.dev)
+- 공개 소스: [https://github.com/chococobyeol/tarot-milktea-web](https://github.com/chococobyeol/tarot-milktea-web)
+
+정적 화면과 같은 출처의 API를 하나의 Cloudflare Worker로 배포했습니다. 질문 구성과 카드 해석은 Workers AI, 익명 세션의 사용량 카운터는 D1을 사용합니다.
+
 ## 로컬 실행
 
 Node.js 22 LTS(22.13 이상) 또는 24 이상을 권장합니다. Node.js 23에서도 빌드는 되지만 일부 개발 도구가 엔진 경고를 표시합니다.
@@ -21,9 +28,9 @@ npm test
 npm run db:generate
 ```
 
-## Cloudflare 배포 시 필요한 설정
+## Cloudflare 운영 구성
 
-코드는 Cloudflare Pages/Sites의 Worker 런타임과 D1을 기준으로 구성되어 있습니다. 실제 배포 단계에서 다음 바인딩과 비밀값을 설정해야 합니다.
+현재 운영 배포에는 다음 바인딩과 비밀값이 설정되어 있습니다.
 
 - Workers AI 바인딩: `AI`
 - D1 바인딩: `DB`
@@ -33,7 +40,7 @@ npm run db:generate
 - Rate Limiting 바인딩 `SESSION_RATE_LIMITER`: 세션 기준 분당 10회
 - Rate Limiting 바인딩 `NETWORK_RATE_LIMITER`: 네트워크 기준 분당 30회
 
-계정이나 비밀키는 저장소에 넣지 않습니다. 배포 전에는 `PROJECT_PLAN.md`의 배포 체크리스트도 확인합니다.
+`SESSION_SECRET`과 `TURNSTILE_SECRET`은 Cloudflare의 암호화된 Worker secret으로만 저장합니다. 계정 식별자와 로컬 배포 설정도 저장소에 넣지 않으며 `.wrangler/` 전체를 Git에서 제외합니다. 운영 상태와 검증 기록은 `PROJECT_PLAN.md`에 정리합니다.
 
 ## 데이터와 저장 범위
 

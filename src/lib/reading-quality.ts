@@ -28,13 +28,13 @@ const DOMAIN_PATTERNS: Record<EverydayDomain, RegExp> = {
 const KOREAN_DOMAIN_ANCHORS: Record<EverydayDomain, RegExp> = {
   food: /아침|점심|저녁|오전|식사|메뉴|음식|먹|간식|끼니|배달|요리|조리|재료|포만|영양|에너지|식욕|설거지|배고픔|허기|식사량/,
   outfit: /옷|코디|입|신발|겉옷|복장|소재|기온|날씨|외출/,
-  schedule: /오늘|주말|할 일|일정|약속|마감|순서|시간|휴식|외출/,
+  schedule: /오늘|주말|할 일|일정|약속|마감|기한|순서|우선|업무|작업|과제|처리|중요|긴급|착수|시작|완료|집중|시간|휴식|외출/,
 };
 
 const KOREAN_AXIS_ANCHORS: Record<EverydayDomain, string[]> = {
-  food: ["준비", "포만", "영양", "조리", "가격", "비용", "에너지", "피로", "시간", "소화", "간편", "선택", "허기", "식사량", "만족", "입맛"],
+  food: ["메뉴", "준비", "포만", "영양", "조리", "가격", "비용", "에너지", "피로", "시간", "소화", "간편", "선택", "식욕", "배고픔", "허기", "식사량", "만족", "입맛"],
   outfit: ["기온", "날씨", "활동", "이동", "편안", "보온", "통풍", "외출", "격식", "세탁"],
-  schedule: ["시간", "마감", "순서", "집중", "피로", "휴식", "이동", "약속", "소요", "우선"],
+  schedule: ["시간", "마감", "기한", "순서", "집중", "피로", "휴식", "이동", "약속", "소요", "우선", "업무", "작업", "과제", "처리", "중요", "긴급", "착수", "시작", "완료", "실행", "속도", "목표", "영향"],
 };
 
 const EVERYDAY_FORBIDDEN_WORDS = /방향성|안정성|지속 가능성|자원|성과|책임|장기적|외부 조건|실행 가능성|요소|종합적으로/g;
@@ -60,13 +60,22 @@ const GENERIC_PLAN_TITLE = /^(?:방향성|외부 조건|실행 가능성|현재 
 
 const SCOPE_EXPANSIONS: Array<{ output: RegExp; allowedByQuestion: RegExp }> = [
   { output: /장기(?:적|적인|적으로)?/, allowedByQuestion: /장기|오래|지속/ },
-  { output: /재정|자산|수익|성과|경제적|자원|책임/, allowedByQuestion: /재정|돈|가격|비용|예산|수익|자산|경제|성과|자원|책임/ },
+  { output: /재정(?!립|비)|자산|수익|성과|경제적|자원|책임/, allowedByQuestion: /재정(?!립|비)|돈|가격|비용|예산|수익|자산|경제|성과|자원|책임/ },
   { output: /조직|운영 구조|책임 범위/, allowedByQuestion: /조직|회사|직장|사업|운영|책임/ },
   { output: /타인의 신호|인간관계|상대방|주변의 도움/, allowedByQuestion: /타인|상대|관계|도움|함께|주변/ },
 ];
 
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^0-9a-z가-힣]/g, "");
+}
+
+export function groundPositionConnection(value: string, positionTitle: string): string {
+  if (normalize(value).includes(normalize(positionTitle))) return value;
+  const positionLabel = positionTitle.trim().endsWith("자리")
+    ? positionTitle.trim()
+    : `${positionTitle.trim()} 자리`;
+  const connection = value.trim().replace(/^(?:이|해당)\s*자리(?:에서는|에서|에선)\s*/u, "");
+  return `${positionLabel}에서는 ${connection}`;
 }
 
 function appliedProseSections(result: ReadingResult): string[] {
@@ -85,7 +94,7 @@ function appliedProseSections(result: ReadingResult): string[] {
 }
 
 const KOREAN_POLITE_ENDING = /합니다|하십시오|하세요|됩니다|있습니다|없습니다|입니다/;
-const INTERNAL_SCHEMA_TERM = /positionFocus|positionTitle|sourceMeaning|questionConnection|decisionImpact|cardInterpretations|evidenceCardIds/;
+const INTERNAL_SCHEMA_TERM = /position[_ ]?focus|position[_ ]?title|source[_ ]?meaning|question[_ ]?connection|decision[_ ]?impact|card[_ ]?interpretations|evidence[_ ]?card[_ ]?ids/i;
 
 const UNSUPPORTED_FOOD_CAUSALITY: RegExp[] = [
   /조리(?:가| 과정| 시간| 부담).{0,35}(?:포만감|든든함).{0,25}(?:높|늘|증가|보장|확보)/,
@@ -94,8 +103,8 @@ const UNSUPPORTED_FOOD_CAUSALITY: RegExp[] = [
   /(?:금방|곧) (?:허기|배가 고)/,
   /실제 배를 채워.{0,25}(?:못|않|어렵)/,
   /포만감(?:은|이|을)?.{0,25}(?:낮|높|부족|지속되지|이어지기 어렵)/,
-  /식사(?: 직후| 후).{0,25}(?:만족감|포만감).{0,35}(?:유지되지|떨어|낮|사라)/,
-  /식사(?: 직후| 후).{0,25}만족감.{0,30}(?:예상과 다|다를 수)/,
+  /식사\s*(?:직후|후)(?:의|에는?|에서)?\s*.{0,20}(?:만족감|포만감).{0,35}(?:(?:유지|지속).{0,8}(?:않|못|어렵)|달라|변하|떨어|낮|사라|이어지|예상과 다|다를 수)/,
+  /(?:기분|감정|심리).{0,45}(?:때문|영향|변화|따라|인해).{0,60}식사\s*(?:직후|후)(?:의|에는?|에서)?\s*.{0,20}(?:만족감|포만감).{0,25}(?:달라|변하|떨어|낮|지속|유지|이어지)/,
   /기분.{0,25}(?:과식|불충분한 식사)/,
 ];
 
@@ -111,7 +120,20 @@ const FOOD_SPECIFIC_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegE
 ];
 
 const PHYSICAL_FOOD_POSITION = /포만|영양|소화|에너지|식욕|건강/;
-const PHYSICAL_LIMIT_STATEMENT = /(?:카드|타로|상징).{0,45}(?:포만감|영양|소화|에너지|식욕|신체).{0,45}(?:예측|판단|측정|보장).{0,20}(?:않|아니|못|할 수 없)/;
+const PHYSICAL_CARD_REFERENCE = /카드|타로|상징/;
+const PHYSICAL_ATTRIBUTE = /포만감|영양|소화|에너지|식욕|신체/;
+const PHYSICAL_NEGATIVE_JUDGMENT = /(?:(?:예측|판단|측정|보장|확인)(?:할)?\s*수(?:는)?\s*없|(?:예측|판단|측정|보장|확인)(?:하|되)지\s*(?:않|못)|(?:예측|판단|측정|보장|확인)하기\s*어렵|알\s*수(?:는)?\s*없|알기\s*어렵)/;
+
+export function isPhysicalFoodPosition(positionTitle: string, positionFocus: string): boolean {
+  return PHYSICAL_FOOD_POSITION.test(`${positionTitle} ${positionFocus}`);
+}
+
+function hasPhysicalLimitStatement(value: string): boolean {
+  if (!PHYSICAL_CARD_REFERENCE.test(value)) return false;
+  return value
+    .split(/[.!?]\s*|\n+/u)
+    .some((sentence) => PHYSICAL_ATTRIBUTE.test(sentence) && PHYSICAL_NEGATIVE_JUDGMENT.test(sentence));
+}
 
 export function detectEverydayDomain(question: string): EverydayDomain | null {
   for (const [domain, pattern] of Object.entries(DOMAIN_PATTERNS) as Array<[EverydayDomain, RegExp]>) {
@@ -183,16 +205,57 @@ export function polishReadingLanguage(
   question: string,
   language: ReadingLanguage,
 ): ReadingResult {
-  if (language !== "ko") return result;
-  const food = detectEverydayDomain(question) === "food";
+  const domain = language === "ko" ? detectEverydayDomain(question) : null;
+  const food = domain === "food";
+  const concreteDirectionTerm = domain ? ({
+    food: "메뉴 선택 기준",
+    outfit: "옷 선택 기준",
+    schedule: "목표 설정",
+  } as const)[domain] : null;
   const polish = (value: string): string => {
-    const base = value
-    .replace(/positionFocus(?:인|은|는|:)?\s*/g, "")
-    .replaceAll("positionTitle", "자리 이름")
-    .replaceAll("sourceMeaning", "카드 원뜻")
-    .replaceAll("questionConnection", "질문 연결")
-    .replaceAll("decisionImpact", "판단 영향")
-    .replaceAll("evidenceCardIds", "근거 카드");
+    let base = value.replace(/\*\*|__|`/g, "");
+    if (language !== "ko") return base;
+    base = base
+    .replace(/sourceMeaning의\s*([^.!?\n]{1,60}?)이라는\s*원뜻/gi, "$1이라는 카드 원뜻")
+    .replace(/카드 원뜻의\s*([^.!?\n]{1,60}?)이라는\s*원뜻/g, "$1이라는 카드 원뜻")
+    .replace(/positionFocus인/gi, "이 자리에서 살필")
+    .replace(/자리 초점인/g, "이 자리에서 살필")
+    .replace(/positionFocus(?:을|를)/gi, "자리 초점을")
+    .replace(/positionFocus(?:은|는)/gi, "자리 초점은")
+    .replace(/positionFocus(?:이|가)/gi, "자리 초점이")
+    .replace(/positionFocus/gi, "자리 초점")
+    .replace(/positionTitle/gi, "자리 이름")
+    .replace(/sourceMeaning/gi, "카드 원뜻")
+    .replace(/questionConnection/gi, "질문 연결")
+    .replace(/decisionImpact/gi, "판단 영향")
+    .replace(/evidenceCardIds/gi, "근거 카드");
+    if (concreteDirectionTerm) {
+      if (domain === "schedule") {
+        base = base
+          .replace(/장기적(?:인)?\s*회복(?:으로|로)/g, "오늘 일정의 재정비로")
+          .replace(/장기적(?:인)?\s*회복(?:을|를)/g, "오늘 일정의 재정비를")
+          .replace(/장기적(?:인)?\s*회복(?:이|가)/g, "오늘 일정의 재정비가")
+          .replace(/장기적(?:인)?\s*회복(?:은|는)/g, "오늘 일정의 재정비는")
+          .replace(/장기적(?:인)?\s*회복(?:과|와)/g, "오늘 일정의 재정비와")
+          .replace(/장기적(?:인)?\s*회복/g, "오늘 일정의 재정비")
+          .replace(/장기적(?:인)?\s*계획/g, "오늘 일정")
+          .replace(/장기적(?:인)?\s*목표/g, "오늘의 핵심 목표")
+          .replace(/장기적(?:인)?\s*방향성/g, "오늘의 우선 기준")
+          .replace(/일정(?:의)?\s*안정성(?:으로|로)/g, "일정 유지로")
+          .replace(/일정(?:의)?\s*안정성을/g, "일정 유지를")
+          .replace(/일정(?:의)?\s*안정성이/g, "일정 유지가")
+          .replace(/일정(?:의)?\s*안정성은/g, "일정 유지는")
+          .replace(/일정(?:의)?\s*안정성과/g, "일정 유지와")
+          .replace(/일정(?:의)?\s*안정성/g, "일정 유지")
+          .replace(/목표를\s*향한\s*방향성/g, "우선 기준")
+          .replace(/방향성을\s*설정/g, "목표를 설정")
+          .replace(/방향성\s*설정/g, "목표 설정")
+          .replace(/방향성을\s*정하/g, "목표를 정하")
+          .replace(/방향성을\s*잡/g, "작업 순서를 정");
+      }
+      base = base.replaceAll("방향성", concreteDirectionTerm);
+    }
+    base = base.replace(/우선 기준(?:을|를)\s*기준으로/g, "우선 기준으로");
     if (!food) return base;
     return base
     .replaceAll("오전 동안 지속 가능한 포만감", "오전까지 오래가는 포만감")
@@ -210,7 +273,9 @@ export function polishReadingLanguage(
       ...item,
       text: polish(item.text),
       reasoning: item.reasoning ? {
-        sourceMeaning: polish(item.reasoning.sourceMeaning),
+        sourceMeaning: language === "ko"
+          ? item.reasoning.sourceMeaning
+          : polish(item.reasoning.sourceMeaning),
         questionConnection: polish(item.reasoning.questionConnection),
         decisionImpact: polish(item.reasoning.decisionImpact),
       } : undefined,
@@ -298,7 +363,7 @@ export function enforceReadingQuality(
   const normalizedSources = context.sourceSentences.map(normalize).filter(Boolean);
   const copiedCaution = normalizedSections.some((section) => normalizedSources.some((source) => section.includes(source)));
   if (copiedCaution) {
-    issues.push("카드 데이터의 일반 주의문을 질문 맥락에 맞게 바꾸지 않고 복사했다.");
+    issues.push("카드 데이터 문장을 질문 맥락에 맞게 바꾸지 않고 복사했다.");
   }
 
   const domain = detectEverydayDomain(context.question);
@@ -318,17 +383,15 @@ export function enforceReadingQuality(
     if (!anchor.test(result.summary) || !anchor.test(result.synthesis)) {
       issues.push("summary와 synthesis 모두 식사·옷·일정 등 질문 대상을 직접 언급해야 한다.");
     }
-    const ungroundedGuidance = result.guidance
-      .map((item, index) => (anchor.test(item) ? -1 : index))
-      .filter((index) => index >= 0);
-    if (ungroundedGuidance.length > 0) {
-      issues.push(`guidance ${ungroundedGuidance.join(", ")}번 항목을 질문 대상에 직접 연결해야 한다.`);
+    if (!anchor.test(result.guidance.join(" "))) {
+      issues.push("guidance를 질문 대상에 직접 연결해야 한다.");
     }
     const ungroundedCards = result.cardInterpretations
-      .filter((item) => !anchor.test(item.text)
-        || !item.reasoning
-        || !anchor.test(item.reasoning.questionConnection)
-        || !anchor.test(item.reasoning.decisionImpact))
+      .filter((item) => !item.reasoning || !anchor.test([
+        item.text,
+        item.reasoning.questionConnection,
+        item.reasoning.decisionImpact,
+      ].join(" ")))
       .map((item) => item.cardId);
     if (ungroundedCards.length > 0) {
       issues.push(`카드 ${ungroundedCards.join(", ")}의 결론, 질문 연결 이유, 판단 영향을 질문 대상에 직접 연결해야 한다.`);
@@ -368,15 +431,15 @@ export function enforceReadingQuality(
       if (expected.sourceMeaning && actual.reasoning.sourceMeaning !== expected.sourceMeaning) {
         issues.push(`${expected.cardName}의 원뜻은 서버가 제공한 카드 문장을 그대로 사용해야 한다.`);
       }
-      if (!actual.reasoning.questionConnection.includes(expected.positionTitle)) {
+      if (!normalize(actual.reasoning.questionConnection).includes(normalize(expected.positionTitle))) {
         issues.push(`${expected.cardName}의 질문 연결 이유에 자리 이름 "${expected.positionTitle}"을 직접 써야 한다.`);
       }
       if (
         detectEverydayDomain(context.question) === "food"
-        && PHYSICAL_FOOD_POSITION.test(`${expected.positionTitle} ${expected.positionFocus}`)
+        && isPhysicalFoodPosition(expected.positionTitle, expected.positionFocus)
       ) {
         const physicalReasoning = `${actual.reasoning.questionConnection} ${actual.reasoning.decisionImpact}`;
-        if (!PHYSICAL_LIMIT_STATEMENT.test(physicalReasoning)) {
+        if (!hasPhysicalLimitStatement(physicalReasoning)) {
           issues.push(`${expected.cardName} 해석에서 카드가 실제 포만감·영양 상태를 예측할 수 없다는 경계를 명시해야 한다.`);
         }
       }
@@ -386,15 +449,16 @@ export function enforceReadingQuality(
     if (mentionedCardCount < Math.min(2, expectedCards.length)) {
       issues.push("종합 해석에서 카드 이름과 질문의 관계를 근거로 설명해야 한다.");
     }
-    const synthesisSentences = result.synthesis
-      .split(/[.!?]\s*/)
-      .map((sentence) => sentence.trim())
-      .filter(Boolean);
-    if (
-      synthesisSentences.length !== expectedCards.length
-      || expectedCards.some((card, index) => !synthesisSentences[index]?.startsWith(card.cardName))
-    ) {
-      issues.push(`synthesis는 요청 순서대로 카드 이름으로 시작하는 문장 ${expectedCards.length}개만 작성해야 한다.`);
+    const normalizedSynthesis = normalize(result.synthesis);
+    let previousCardOffset = -1;
+    const cardsOutOfOrder = expectedCards.some((card) => {
+      const offset = normalizedSynthesis.indexOf(normalize(card.cardName), previousCardOffset + 1);
+      if (offset < 0) return true;
+      previousCardOffset = offset;
+      return false;
+    });
+    if (cardsOutOfOrder) {
+      issues.push("synthesis에서 요청 순서대로 모든 카드 이름과 질문의 관계를 설명해야 한다.");
     }
     const cardAsPerson = expectedCards.find((card) => new RegExp(`${card.cardName}.{0,80}(?:식사를 한다|메뉴를 (?:고른다|선택한다)|음식을 먹는다|옷을 입는다|일정을 실행한다)`).test(result.synthesis));
     if (cardAsPerson) {

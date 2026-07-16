@@ -14,6 +14,8 @@ import {
   detectEverydayDomain,
   enforcePlanQuality,
   enforceReadingQuality,
+  groundPositionConnection,
+  isPhysicalFoodPosition,
   polishReadingLanguage,
   questionScopeGuide,
   type ExpectedInterpretation,
@@ -80,7 +82,12 @@ function parseJsonText(text: string): unknown {
   return JSON.parse((fenced ?? text).trim());
 }
 
-function normalizeReadingShape(value: unknown, expectedCards: ExpectedInterpretation[]): unknown {
+function normalizeReadingShape(
+  value: unknown,
+  expectedCards: ExpectedInterpretation[],
+  everydayDomain: ReturnType<typeof detectEverydayDomain>,
+  language: ReadingLanguage,
+): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
   const normalizedInterpretations = Array.isArray(record.cardInterpretations)
@@ -95,33 +102,48 @@ function normalizeReadingShape(value: unknown, expectedCards: ExpectedInterpreta
       };
     })
     : record.cardInterpretations;
-  const orderedInterpretations = Array.isArray(normalizedInterpretations)
-    ? expectedCards.map((expected) => normalizedInterpretations.find((item) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return false;
-      const interpretation = item as Record<string, unknown>;
-      return interpretation.cardId === expected.cardId
-        && interpretation.positionTitle === expected.positionTitle
-        && interpretation.orientation === expected.orientation;
-    }))
+  const hasExactCardSet = Array.isArray(normalizedInterpretations)
+    && normalizedInterpretations.length === expectedCards.length
+    && expectedCards.every((expected) => normalizedInterpretations.filter((item) => (
+      item
+      && typeof item === "object"
+      && !Array.isArray(item)
+      && (item as Record<string, unknown>).cardId === expected.cardId
+    )).length === 1);
+  const orderedInterpretations = hasExactCardSet
+    ? expectedCards.map((expected) => normalizedInterpretations.find((item) => (
+      item
+      && typeof item === "object"
+      && !Array.isArray(item)
+      && (item as Record<string, unknown>).cardId === expected.cardId
+    )))
     : [];
-  const orderedOrOriginal = orderedInterpretations.length === expectedCards.length
-    && orderedInterpretations.every(Boolean)
+  const orderedOrOriginal = hasExactCardSet
     ? orderedInterpretations
     : normalizedInterpretations;
   const cardInterpretations = Array.isArray(orderedOrOriginal)
     ? orderedOrOriginal.map((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return item;
       const interpretation = item as Record<string, unknown>;
-      const expected = expectedCards.find((candidate) => candidate.cardId === interpretation.cardId
-        && candidate.positionTitle === interpretation.positionTitle
-        && candidate.orientation === interpretation.orientation);
+      const expected = expectedCards.find((candidate) => candidate.cardId === interpretation.cardId);
       if (!expected) return interpretation;
       const reasoning = interpretation.reasoning;
+      const reasoningRecord = reasoning && typeof reasoning === "object" && !Array.isArray(reasoning)
+        ? reasoning as Record<string, unknown>
+        : null;
+      const questionConnection = typeof reasoningRecord?.questionConnection === "string"
+        ? (language === "ko"
+          ? groundPositionConnection(reasoningRecord.questionConnection, expected.positionTitle)
+          : reasoningRecord.questionConnection)
+        : reasoningRecord?.questionConnection;
       return {
         ...interpretation,
-        reasoning: reasoning && typeof reasoning === "object" && !Array.isArray(reasoning)
+        positionTitle: expected.positionTitle,
+        orientation: expected.orientation,
+        reasoning: reasoningRecord
           ? {
-            ...(reasoning as Record<string, unknown>),
+            ...reasoningRecord,
+            questionConnection,
             ...(expected.sourceMeaning ? { sourceMeaning: expected.sourceMeaning } : {}),
           }
           : reasoning,
@@ -130,11 +152,8 @@ function normalizeReadingShape(value: unknown, expectedCards: ExpectedInterpreta
     })
     : orderedOrOriginal;
 
-  return {
-    ...record,
-    cardInterpretations,
-    axes: Array.isArray(record.axes)
-      ? record.axes.map((item) => {
+  const normalizedAxes = Array.isArray(record.axes)
+    ? record.axes.map((item) => {
         if (!item || typeof item !== "object" || Array.isArray(item)) return item;
         const axis = item as Record<string, unknown>;
         return {
@@ -144,7 +163,33 @@ function normalizeReadingShape(value: unknown, expectedCards: ExpectedInterpreta
             : axis.evidence,
         };
       })
-      : record.axes,
+    : record.axes;
+  const physicalFoodCard = language === "ko"
+    && everydayDomain === "food"
+    && expectedCards.length === 1
+    && isPhysicalFoodPosition(expectedCards[0].positionTitle, expectedCards[0].positionFocus)
+    ? expectedCards[0]
+    : null;
+  const axes = physicalFoodCard && Array.isArray(normalizedAxes) && normalizedAxes.length === 2
+    ? [
+      ...normalizedAxes,
+      {
+        label: "식사량 확인",
+        score: Math.round(normalizedAxes.reduce((sum, item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return sum + 50;
+          const score = (item as Record<string, unknown>).score;
+          return sum + (typeof score === "number" && Number.isFinite(score) ? score : 50);
+        }, 0) / 2),
+        evidence: "타로 카드는 실제 포만감을 알 수 없으므로 현재 배고픔과 사용자가 이미 아는 식사량을 직접 확인한다.",
+        evidenceCardIds: [physicalFoodCard.cardId],
+      },
+    ]
+    : normalizedAxes;
+
+  return {
+    ...record,
+    cardInterpretations,
+    axes,
   };
 }
 
@@ -267,6 +312,17 @@ async function createAiInterpretation(
   const selectedData = cardsToInterpret.map((selected) => {
     const card = getCard(selected.cardId);
     const meaning = card[selected.reversed ? "reversed" : "upright"];
+    const applicationBoundaries: string[] = [];
+    if (everydayDomain === "schedule") {
+      applicationBoundaries.push(language === "ko"
+        ? "카드 원뜻의 장기 목표·장기 회복·안정성은 카드 원뜻 설명에만 남긴다. 적용 문장에서는 오늘 할 일의 순서, 마감, 착수, 일정 정비로 범위를 줄인다. 급한 일보다 먼 미래의 목표를 우선하라고 결론내리지 않는다."
+        : "Keep long-term goals, recovery, and stability only in the card's source meaning. In applied prose, narrow them to today's task order, deadlines, starting criteria, and schedule cleanup. Do not prioritize distant goals over today's urgent work.");
+    }
+    if (everydayDomain === "food" && isPhysicalFoodPosition(selected.positionTitle, selected.positionFocus)) {
+      applicationBoundaries.push(language === "ko"
+        ? "카드 원뜻은 먹기 전 메뉴 선택 과정에만 적용한다. 카드의 감정·기분 의미를 식사 후 만족감, 포만감, 영양, 소화의 실제 결과로 바꾸지 않는다. 타로 카드만으로 실제 포만감을 알 수 없다고 명시하고 현재 배고픔과 사용자가 이미 아는 식사량을 직접 확인하게 한다."
+        : "Apply the card only to the pre-meal decision process. Do not turn emotions or symbolism into claims about post-meal satisfaction, physical fullness, nutrition, or digestion. State that tarot cannot determine physical outcomes and direct the user to information they can verify.");
+    }
     return {
       selected: {
         positionId: selected.positionId,
@@ -274,6 +330,9 @@ async function createAiInterpretation(
         positionFocus: selected.positionFocus,
         orientation: selected.reversed ? "reversed" : "upright",
         orientationLabel: orientationLabel(selected.reversed, language),
+        ...(applicationBoundaries.length > 0
+          ? { applicationBoundary: applicationBoundaries.join(" ") }
+          : {}),
       },
       card: {
         id: card.id,
@@ -290,7 +349,11 @@ async function createAiInterpretation(
   });
   const lengthGuide = language === "ko"
     ? (everydayDomain
-      ? (cardsToInterpret.length <= 2 ? "전체 한국어 본문은 750~1400자" : "전체 한국어 본문은 1100~2100자")
+      ? (cardsToInterpret.length === 1
+        ? "전체 한국어 본문은 450~900자"
+        : cardsToInterpret.length === 2
+          ? "전체 한국어 본문은 650~1200자"
+          : "전체 한국어 본문은 1100~2100자")
       : (previous ? "전체 한국어 본문은 700~1400자" : "전체 한국어 본문은 900~1900자"))
     : (previous ? "The complete English response should be about 350–700 words" : "The complete English response should be about 450–1000 words");
   const sourceSentences = cardsToInterpret.flatMap((selected) => {
@@ -311,6 +374,8 @@ async function createAiInterpretation(
 선택 카드와 참고 데이터: ${JSON.stringify(selectedData)}
 이전 결과의 연결 정보(문체를 모방하지 말 것): ${JSON.stringify(previousContext)}
 
+선택 카드의 selected.applicationBoundary가 있으면 해당 경계를 카드별 해석, 종합, 확인 항목, 그래프 축 전체에 반드시 적용한다.
+
 필수 JSON 필드:
 - summary: 질문에 대한 직접적인 결론과 우선할 선택 기준을 2~3문장으로 쓴다. 카드 이름이나 키워드를 나열하지 않는다.
 - cardInterpretations: 정확히 ${expectedCards.length}개이며 중복을 만들지 않는다. 다음 순서와 cardId, positionTitle, orientation 값을 그대로 사용한다: ${JSON.stringify(expectedCards.map(({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, sourceMeaning, evidence }) => ({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, sourceMeaning, evidence })))}.
@@ -321,7 +386,7 @@ async function createAiInterpretation(
   - evidence: AI가 새 주장을 만들지 말고 위 목록에 지정된 evidence 문자열을 그대로 사용한다.
 - synthesis: 정확히 카드당 한 문장씩 ${expectedCards.length}문장으로 쓴다. 각 문장은 카드 이름으로 시작하고 그 카드가 결론을 뒷받침하는 이유를 질문의 말로 설명한다. 카드를 "식사를 한다/옷을 입는다" 같은 사람 행동의 주어로 쓰지 말고 "~을 우선하라는 근거가 된다/~에 무게를 둔다"처럼 쓴다. 카드 문장 뒤에 전체를 다시 요약하는 결론 문장을 추가하지 않는다.
 - guidance: 사용자가 실제로 확인하거나 실행할 수 있는 짧은 항목 2~4개. 카드 데이터의 genericCautionTheme 문장을 복사하지 않는다.
-- axes: 질문에 맞는 3~5개 축. 각 항목은 label, score(0~100 정수), evidence(질문에 연결된 한 문장 문자열), evidenceCardIds
+- axes: 질문에 맞는 ${expectedCards.length === 1 ? "정확히 3개" : "3~5개"} 축. 각 항목은 label, score(0~100 정수), evidence(질문에 연결된 한 문장 문자열), evidenceCardIds
 - signals: support, caution, uncertainty 정수이며 합계 100
 - limitation: 확률이나 확정 예측이 아니라는 한계
 
@@ -336,18 +401,18 @@ JSON 자료형 예시:
   "limitation": "문자열"
 }
 
-한국어의 text, questionConnection, decisionImpact에는 질문에 나온 대상과 행동을 명시한다. sourceMeaning은 카드 원뜻만 정확히 설명하고, questionConnection에서 원뜻→자리 역할→결론의 이유를 순서대로 연결한다. 추상명사를 세 개 이상 이어 붙이거나 "적절하다", "필요하다"로만 결론내리지 않는다.
+한국어의 text, questionConnection, decisionImpact를 합쳐 읽었을 때 질문에 나온 대상과 행동이 분명해야 한다. sourceMeaning은 카드 원뜻만 정확히 설명하고, questionConnection에서 원뜻→자리 역할→결론의 이유를 순서대로 연결한다. 추상명사를 세 개 이상 이어 붙이거나 "적절하다", "필요하다"로만 결론내리지 않는다.
 positionFocus, positionTitle, sourceMeaning, questionConnection, decisionImpact, evidenceCardIds 같은 JSON 키 이름을 사용자에게 보이는 문장에 쓰지 않는다.
 질문에 구체적인 선택지가 없으면 임의의 메뉴나 사실을 만들어내지 말고 선택 기준과 다음 행동을 제시한다.
-식사 질문에서는 알레르기, 질환, 식단 제한, 메뉴, 맛의 특성, 영양 사실, 평소 습관을 추정하지 않는다. 질문과 자리 초점에 없는 "자극적인 메뉴", "화려한 음식", "든든한 재료", "미리 정한 식단", "활동량", "과식" 같은 표현도 만들지 않는다. 포만감과 기분상의 만족감은 같은 뜻이 아니다. 조리 부담이 적거나 메뉴가 익숙하다는 이유만으로 포만감이 높아진다고 주장하지 않는다. 심리·감정에 관한 카드 원뜻은 사용자의 식욕 판단이나 메뉴 선택 과정에만 연결하고, 음식의 물리적 결과로 바꾸지 않는다. 예를 들어 기분 변화는 먹고 싶은 마음이 흔들릴 수 있다는 주의이지, 실제로 금방 허기지거나 포만감이 낮거나 식사 후 만족감이 예상과 달라진다는 예측이 아니다. 메뉴 자체를 "식욕이나 마음이 변한다"의 주어로 쓰지 않는다.
+${everydayDomain === "food" ? `식사 질문에서는 알레르기, 질환, 식단 제한, 메뉴, 맛의 특성, 영양 사실, 평소 습관을 추정하지 않는다. 질문과 자리 초점에 없는 "자극적인 메뉴", "화려한 음식", "든든한 재료", "미리 정한 식단", "활동량", "과식" 같은 표현도 만들지 않는다. 포만감과 기분상의 만족감은 같은 뜻이 아니다. 조리 부담이 적거나 메뉴가 익숙하다는 이유만으로 포만감이 높아진다고 주장하지 않는다. 심리·감정에 관한 카드 원뜻은 사용자의 식욕 판단이나 메뉴 선택 과정에만 연결하고, 음식의 물리적 결과로 바꾸지 않는다. 예를 들어 기분 변화는 먹고 싶은 마음이 흔들릴 수 있다는 주의이지, 실제로 금방 허기지거나 포만감이 낮거나 식사 후 만족감이 예상과 달라진다는 예측이 아니다. 메뉴 자체를 "식욕이나 마음이 변한다"의 주어로 쓰지 않는다.
 positionTitle 또는 positionFocus가 포만감·영양·소화·에너지처럼 신체적으로 확인해야 하는 속성이면 questionConnection이나 decisionImpact에 "카드는 실제 포만감을 예측할 수 없다"와 같은 한계를 명시한다. 그 뒤 현재 배고픔, 사용자가 이미 아는 식사량, 오전 일정처럼 직접 확인할 정보와 연결한다.
 특히 심리 카드가 이런 신체 속성 자리에 있으면, 그 속성의 결과를 예측하지 말고 "먹고 싶은 마음"과 "실제 배고픔·사용자가 아는 식사량"처럼 혼동하기 쉬운 판단 기준을 구분하는 역할만 설명한다. 구체적인 선택지가 없는 질문에는 특정 음식을 고른 척하지 말고, 무엇을 확인하면 고를 수 있는지 직접 답한다.
-guidance와 axes도 같은 규칙을 따른다. 카드 상징에서 과식·영양·에너지 필요량 같은 신체 결과를 새로 만들지 말고, 사용자가 직접 확인할 정보가 무엇인지 쓴다.
+guidance와 axes도 같은 규칙을 따른다. 카드 상징에서 과식·영양·에너지 필요량 같은 신체 결과를 새로 만들지 말고, 사용자가 직접 확인할 정보가 무엇인지 쓴다.` : ""}
 추가 질문이면 이전 해석을 반복하지 말고 변화한 판단과 새 카드의 영향에 집중한다.
 추가 질문의 axes는 비교가 가능하도록 이전 결과와 같은 label을 사용한다.
 ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 빠뜨리지 않는다.`;
   return runAiJson(ai, prompt, (value) => {
-    const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards));
+    const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards, everydayDomain, language));
     return enforceReadingQuality(
       polishReadingLanguage(parsed, question, language),
       { question, language, sourceSentences, expectedCards },
