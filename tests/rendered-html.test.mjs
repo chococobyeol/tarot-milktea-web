@@ -55,8 +55,8 @@ test("server-renders the privacy policy page", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>개인정보 처리방침 \| 타로밀크티 웹<\/title>/);
-  assert.match(html, /처리하는 정보와 보유 기간/);
+  assert.match(html, /처리하는 정보/);
   assert.match(html, /Cloudflare Workers AI/);
-  assert.match(html, /tarot_milktea_session/);
+  assert.match(html, /mailto:chaamu\.channel@gmail\.com/);
   assert.match(html, /href="\/"/);
 });

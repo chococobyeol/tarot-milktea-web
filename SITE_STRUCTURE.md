@@ -36,7 +36,7 @@
 | 경로 | 역할 | 주요 구현 |
 |---|---|---|
 | `/` | 홈부터 결과까지 이어지는 타로 앱 | `app/page.tsx`, `src/components/TarotApp.tsx` |
-| `/privacy` | 개인정보 처리방침과 영문 요약 | `app/privacy/page.tsx` |
+| `/privacy` | 개인정보 처리방침 | `app/privacy/page.tsx` |
 | `/api/session` | Turnstile을 확인하고 2시간 익명 세션 발급 | `app/api/session/route.ts` |
 | `/api/tarot` | 질문별 카드 구성 또는 선택 카드 해석 | `app/api/tarot/route.ts` |
 

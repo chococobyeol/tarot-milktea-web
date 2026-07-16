@@ -1502,7 +1502,7 @@ export function TarotApp() {
             </section>
             <nav className="settings-legal" aria-label={t.legalInformation}>
               <Link
-                href={language === "ko" ? "/privacy" : "/privacy#english-summary"}
+                href="/privacy"
                 onClick={() => setSettingsOpen(false)}
               >
                 <span>{t.privacyPolicy}</span>
