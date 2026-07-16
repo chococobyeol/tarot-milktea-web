@@ -101,6 +101,13 @@ const SESSION_KEY = "tarot-milktea-current-reading";
 const NICKNAME_KEY = "tarot-milktea-nickname";
 const LANGUAGE_KEY = "tarot-milktea-language";
 
+function localDateStamp(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function formatDate(value: string, language: AppLanguage): string {
   return new Intl.DateTimeFormat(language === "ko" ? "ko-KR" : "en-US", {
     year: "numeric",
@@ -577,7 +584,7 @@ export function TarotApp() {
 
           objectUrl = URL.createObjectURL(blob);
           const link = document.createElement("a");
-          link.download = `tarot-milktea-${new Date().toISOString().slice(0, 10)}.png`;
+          link.download = `tarot-milktea-${localDateStamp()}.png`;
           link.href = objectUrl;
           document.body.appendChild(link);
           link.click();
