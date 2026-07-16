@@ -3794,6 +3794,50 @@ textarea:focus-visible {
 }
 
 @media (max-width: 760px) and (max-height: 640px) {
+  .phase-home .game-stage,
+  .home-scene {
+    min-height: 100dvh;
+  }
+
+  .home-scene {
+    padding: 8px 14px 14px;
+    grid-template-rows: 190px auto;
+  }
+
+  .home-visual {
+    width: min(78vw, 260px);
+    height: 180px;
+  }
+
+  .home-card .card-back {
+    width: min(29vw, 104px);
+  }
+
+  .home-title-main {
+    font-size: clamp(48px, 15vw, 56px);
+  }
+
+  .home-title-addon {
+    font-size: clamp(23px, 7vw, 27px);
+  }
+
+  .home-description {
+    margin: 9px 0;
+    font-size: 14px;
+  }
+
+  .home-eyebrow {
+    margin-bottom: 8px;
+  }
+
+  .home-start-form {
+    padding: 12px;
+  }
+
+  .home-history {
+    margin-top: 8px;
+  }
+
   .intro-center {
     top: 22%;
     transform: translate(-50%, -50%) scale(.56);
