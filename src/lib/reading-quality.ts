@@ -134,6 +134,11 @@ const FOOD_SPECIFIC_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegE
   { output: /강하게 당기는/, allowedByQuestion: /강하게|너무 먹고 싶|당기/ },
 ];
 
+const BINARY_FOOD_OPTION_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegExp }> = [
+  { output: /익숙한 (?:메뉴|식사|음식|재료)/, allowedByQuestion: /익숙|평소|자주/ },
+  { output: /(?:새로운|새) (?:메뉴|식사|음식|재료|조리 방식)/, allowedByQuestion: /새|새롭|처음|재료|조리/ },
+];
+
 const PHYSICAL_FOOD_POSITION = /포만|영양|소화|에너지|식욕|건강/;
 const PHYSICAL_CARD_REFERENCE = /카드|타로|상징/;
 const PHYSICAL_ATTRIBUTE = /포만감|영양|소화|에너지|식욕|신체/;
@@ -480,6 +485,14 @@ export function enforceReadingQuality(
         const match = visibleText.match(assumption.output)?.[0];
         if (match && !assumption.allowedByQuestion.test(suppliedFoodContext)) {
           issues.push(`질문에 없는 음식 특성 "${match}"을 만들어내지 말아야 한다.`);
+        }
+      }
+      if (binaryChoices) {
+        for (const assumption of BINARY_FOOD_OPTION_ASSUMPTIONS) {
+          const match = visibleText.match(assumption.output)?.[0];
+          if (match && !assumption.allowedByQuestion.test(suppliedFoodContext)) {
+            issues.push(`두 선택지에 없던 음식 특성 "${match}"을 만들어내지 말아야 한다.`);
+          }
         }
       }
     }

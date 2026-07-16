@@ -184,7 +184,10 @@ describe("enforceReadingQuality", () => {
       ...baseResult,
       summary: "이번 카드 배열에서는 김치찌개를 골라요. 두 메뉴의 선택 카드를 비교하면 김치찌개 쪽 신호가 더 강해요.",
       guidance: ["이번에는 김치찌개 메뉴를 골라요.", "실제 주문 가능 여부를 확인해요."],
-      cardInterpretations: baseResult.cardInterpretations.slice(0, 2),
+      cardInterpretations: [
+        baseResult.cardInterpretations[0],
+        { ...baseResult.cardInterpretations[1], text: "현재 확인할 수 있는 재료를 선택 기준으로 둬요." },
+      ],
     };
     expect(enforceReadingQuality(directResult, {
       question: "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘",
@@ -613,6 +616,22 @@ describe("enforceReadingQuality", () => {
       sourceSentences: [cupsKnightExpected[0].sourceMeaning],
       expectedCards: cupsKnightExpected,
     })).toThrow();
+  });
+
+  it("rejects invented claims that a menu uses familiar or new ingredients", () => {
+    const inventedResult: ReadingResult = {
+      ...cupsKnightResult,
+      guidance: [
+        "새로운 재료를 쓰는 메뉴를 골라요.",
+        "메뉴를 정한 뒤 준비를 시작해요.",
+      ],
+    };
+    expect(() => enforceReadingQuality(inventedResult, {
+      question: "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘",
+      language: "ko",
+      sourceSentences: [cupsKnightExpected[0].sourceMeaning],
+      expectedCards: cupsKnightExpected,
+    })).toThrow(/두 선택지에 없던 음식 특성/);
   });
 
   it("polishes literal AI phrasing in every reasoning section", () => {
