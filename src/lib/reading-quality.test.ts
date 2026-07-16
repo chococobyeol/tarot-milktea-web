@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { enforcePlanQuality, enforceReadingQuality, groundPositionConnection, polishReadingLanguage } from "./reading-quality";
-import type { ReadingResult } from "./tarot";
+import {
+  enforcePlanQuality,
+  enforceReadingQuality,
+  groundPositionConnection,
+  polishReadingLanguage,
+  resolveEverydayDomain,
+} from "./reading-quality";
+import { designReading, generateReadingResult, type ReadingResult, type SelectedCard } from "./tarot";
 
 const baseResult: ReadingResult = {
   summary: "오늘 아침에는 준비가 간단하면서도 오전 일정까지 버틸 수 있는 식사를 우선하는 편이 낫다.",
@@ -164,8 +170,92 @@ const scheduleResult: ReadingResult = {
 };
 
 describe("enforceReadingQuality", () => {
-  it("rejects invented physical food criteria in a two-menu plan", () => {
+  it("uses the current follow-up domain before the earlier conversation domain", () => {
+    const foodContext = {
+      initialQuestion: "아침 뭐 먹을까?",
+      previousQuestions: [],
+      previousAnswer: "토스트를 추천해요.",
+      previousContract: {
+        kind: "recommend_one" as const,
+        subject: "아침 메뉴",
+        candidates: ["토스트", "죽", "샌드위치"],
+        decisive: true,
+      },
+    };
+
+    expect(resolveEverydayDomain("그럼 내일 뭐 입는 게 좋을까?", foodContext)).toBe("outfit");
+    expect(resolveEverydayDomain("그래서 정확히 어느 쪽이야?", foodContext)).toBe("food");
+    expect(resolveEverydayDomain("그 사람의 속마음은 어때?", foodContext)).toBeNull();
+  });
+
+  it("normalizes candidate positions without replacing the AI semantic intent", () => {
+    const plan = enforcePlanQuality({
+      cardCount: 2,
+      interpretationFrame: "아침 식사를 살펴봐요.",
+      selectionGuide: "카드를 골라요.",
+      positions: [
+        { id: "a", title: "후보 A", focus: "첫 후보" },
+        { id: "b", title: "후보 B", focus: "둘째 후보" },
+      ],
+      answerContract: {
+        kind: "choose_one",
+        subject: "아침 메뉴",
+        candidates: ["계란말이", "토스트", "샌드위치"],
+        decisive: true,
+      },
+    }, {
+      question: "아침 뭐 먹을까?",
+      language: "ko",
+    });
+
+    expect(plan.answerContract.kind).toBe("recommend_one");
+    expect(plan.cardCount).toBe(3);
+    expect(plan.positions.map((position) => position.title)).toEqual(["계란말이 선택", "토스트 선택", "샌드위치 선택"]);
+
+    const explanationPlan = enforcePlanQuality({
+      cardCount: 2,
+      interpretationFrame: "반복되는 상황의 원인을 살펴봐요.",
+      selectionGuide: "카드 두 장을 골라요.",
+      positions: [
+        { id: "pattern", title: "반복 패턴", focus: "되풀이되는 행동" },
+        { id: "cause", title: "중심 원인", focus: "패턴이 이어지는 이유" },
+      ],
+      answerContract: {
+        kind: "explain",
+        subject: "반복되는 문제",
+        candidates: [],
+        decisive: false,
+      },
+    }, {
+      question: "이 문제가 반복되는 이유가 뭘까?",
+      language: "ko",
+    });
+    expect(explanationPlan.answerContract.kind).toBe("explain");
+  });
+
+  it("rejects an AI plan that avoids a high-confidence requested answer type", () => {
     expect(() => enforcePlanQuality({
+      cardCount: 2,
+      interpretationFrame: "아침 식사 상태를 살펴봐요.",
+      selectionGuide: "카드를 골라요.",
+      positions: [
+        { id: "state", title: "아침 식사 상태", focus: "현재 식사 상태" },
+        { id: "flow", title: "아침 식사 흐름", focus: "식사 선택의 흐름" },
+      ],
+      answerContract: {
+        kind: "analysis",
+        subject: "아침 식사",
+        candidates: [],
+        decisive: false,
+      },
+    }, {
+      question: "아침 뭐 먹을까?",
+      language: "ko",
+    })).toThrow(/답변 유형은 recommend_one/);
+  });
+
+  it("replaces invented physical criteria with candidate signal positions", () => {
+    const plan = enforcePlanQuality({
       cardCount: 2,
       interpretationFrame: "김치찌개와 애호박찌개를 비교해요.",
       selectionGuide: "카드를 골라요.",
@@ -173,10 +263,50 @@ describe("enforceReadingQuality", () => {
         { id: "a", title: "김치찌개 메뉴 선택", focus: "김치찌개의 재료 구성과 포만감을 예측해요." },
         { id: "b", title: "애호박찌개 메뉴 선택", focus: "애호박찌개의 조리 방식과 영양을 예측해요." },
       ],
+      answerContract: {
+        kind: "choose_one",
+        subject: "두 메뉴 중 하나 선택",
+        candidates: ["김치찌개", "애호박찌개"],
+        decisive: true,
+      },
     }, {
       question: "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘",
       language: "ko",
-    })).toThrow(/음식의 맛·영양·조리 특성/);
+    });
+    expect(plan.positions.map((position) => position.title)).toEqual(["김치찌개 선택", "애호박찌개 선택"]);
+    expect(plan.positions.map((position) => position.focus).join(" ")).not.toMatch(/맛|영양|포만|조리|재료/);
+  });
+
+  it("keeps candidate axes distinct when one candidate prefixes another", () => {
+    const question = "A와 A안 중 하나 골라줘";
+    const plan = designReading(question);
+    const selected: SelectedCard[] = [
+      {
+        cardId: "major-07",
+        reversed: false,
+        positionId: plan.positions[0].id,
+        positionTitle: plan.positions[0].title,
+        positionFocus: plan.positions[0].focus,
+        round: 0,
+      },
+      {
+        cardId: "cups-knight",
+        reversed: true,
+        positionId: plan.positions[1].id,
+        positionTitle: plan.positions[1].title,
+        positionFocus: plan.positions[1].focus,
+        round: 0,
+      },
+    ];
+    const result = generateReadingResult(question, selected, undefined, "ko", plan.answerContract);
+
+    expect(plan.answerContract.candidates).toEqual(["A", "A안"]);
+    expect(enforceReadingQuality(result, {
+      question,
+      language: "ko",
+      sourceSentences: [],
+      answerContract: plan.answerContract,
+    })).toBe(result);
   });
 
   it("accepts one explicit verdict for a two-menu question", () => {
@@ -224,6 +354,277 @@ describe("enforceReadingQuality", () => {
       sourceSentences: [],
       expectedCards: expectedCards.slice(0, 2),
     })).toThrow(/결론을 다시/);
+  });
+
+  it("accepts one concrete answer under a general recommendation contract", () => {
+    const answerContract = {
+      kind: "recommend_one" as const,
+      subject: "오늘 먹을 메뉴 하나",
+      candidates: ["김치찌개", "비빔밥", "우동"],
+      decisive: true,
+    };
+    const result: ReadingResult = {
+      ...baseResult,
+      verdict: {
+        kind: "recommend_one",
+        value: "김치찌개",
+        statement: "이번 카드 배열에서는 김치찌개를 먹어요.",
+      },
+      summary: "이번 카드 배열에서는 김치찌개를 먹어요. 세 후보의 카드 신호 중 김치찌개 쪽이 가장 강해요.",
+      synthesis: "전차 카드는 김치찌개 선택에 지지 신호를 더해요. 펜타클 왕 카드는 비빔밥 선택의 카드 신호를 보여줘요. 완드 9 카드는 우동 선택에 주의 신호를 더해요.",
+      guidance: ["오늘 메뉴는 김치찌개로 정해요.", "실제로 먹을 수 없는 사정이 있을 때만 바꿔요."],
+      cardInterpretations: baseResult.cardInterpretations.map((item, index) => {
+        const candidate = answerContract.candidates[index];
+        return {
+          ...item,
+          text: `${candidate} 선택에 나온 카드 신호를 비교해요.`,
+          reasoning: {
+            ...item.reasoning!,
+            questionConnection: `${item.positionTitle} 자리에서는 ${candidate} 선택에 카드 원뜻이 주는 신호를 다른 후보와 비교해요.`,
+            decisionImpact: `${candidate} 자체의 실제 속성이 아니라 이 카드가 선택 판단에 더하는 지지와 주의만 반영해요.`,
+          },
+        };
+      }),
+      axes: [
+        { label: "김치찌개 신호", score: 72, evidence: "김치찌개 후보의 카드 신호예요.", evidenceCardIds: ["major-07"] },
+        { label: "비빔밥 신호", score: 58, evidence: "비빔밥 후보의 카드 신호예요.", evidenceCardIds: ["pentacles-king"] },
+        { label: "우동 신호", score: 44, evidence: "우동 후보의 카드 신호예요.", evidenceCardIds: ["wands-09"] },
+      ],
+    };
+
+    expect(enforceReadingQuality(result, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toBe(result);
+
+    const inventedCandidateFact: ReadingResult = {
+      ...result,
+      synthesis: `${result.synthesis} 김치찌개는 익숙한 메뉴라서 더 안정적이에요.`,
+    };
+    expect(() => enforceReadingQuality(inventedCandidateFact, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/제공되지 않은 현실 특성/);
+
+    expect(() => enforceReadingQuality(inventedCandidateFact, {
+      question: "김치찌개, 비빔밥, 우동 중 하나 골라줘",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/제공되지 않은 현실 특성/);
+  });
+
+  it("rejects criteria-only, out-of-contract, and multi-answer recommendations", () => {
+    const answerContract = {
+      kind: "recommend_one" as const,
+      subject: "오늘 먹을 메뉴 하나",
+      candidates: ["김치찌개", "비빔밥", "우동"],
+      decisive: true,
+    };
+    const criteriaOnly: ReadingResult = {
+      ...baseResult,
+      summary: "준비 과정이 단순하고 익숙한 메뉴를 고르는 것이 좋아요.",
+    };
+    expect(() => enforceReadingQuality(criteriaOnly, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/직접 답/);
+
+    const outsideCandidate: ReadingResult = {
+      ...baseResult,
+      verdict: { kind: "recommend_one", value: "샌드위치", statement: "샌드위치를 먹어요." },
+      summary: "샌드위치를 먹어요. 카드 신호가 이 선택을 지지해요.",
+      guidance: ["샌드위치를 먹어요."],
+    };
+    expect(() => enforceReadingQuality(outsideCandidate, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/후보 중 정확히 하나/);
+
+    const multipleAnswers: ReadingResult = {
+      ...baseResult,
+      verdict: { kind: "recommend_one", value: "김치찌개", statement: "김치찌개와 비빔밥 둘 다 괜찮아요." },
+      summary: "김치찌개와 비빔밥 둘 다 괜찮아요. 조건을 더 확인해요.",
+      guidance: ["김치찌개를 먹어요."],
+    };
+    expect(() => enforceReadingQuality(multipleAnswers, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/미루지|하나만/);
+  });
+
+  it("rejects a generic non-candidate verdict that could answer any question", () => {
+    const answerContract = {
+      kind: "advice" as const,
+      subject: "아침 메뉴를 정하는 다음 행동",
+      candidates: [],
+      decisive: true,
+    };
+    for (const vagueValue of [
+      "먼저 천천히 살펴봐요",
+      "조금 더 살펴봐요",
+      "천천히 확인한 다음 결정해요",
+      "신중하게 접근하는 게 좋아요",
+    ]) {
+      const vagueAdvice: ReadingResult = {
+        ...baseResult,
+        verdict: {
+          kind: "advice",
+          value: vagueValue,
+          statement: `${vagueValue}.`,
+        },
+        summary: `${vagueValue}. 현재 흐름을 점검해요.`,
+      };
+
+      expect(() => enforceReadingQuality(vagueAdvice, {
+        question: "아침 메뉴를 정하려면 먼저 무엇을 해야 해?",
+        language: "ko",
+        sourceSentences: [],
+        answerContract,
+      })).toThrow(/구체적인 원인·흐름·행동·발견/);
+    }
+
+    const unrelatedAdvice: ReadingResult = {
+      ...baseResult,
+      verdict: {
+        kind: "advice",
+        value: "냉장고를 청소해요",
+        statement: "냉장고를 청소해요.",
+      },
+      summary: "냉장고를 청소해요. 아침 메뉴를 정하는 흐름도 함께 점검해요.",
+    };
+    expect(() => enforceReadingQuality(unrelatedAdvice, {
+      question: "관계를 개선하려면 먼저 무엇을 해야 해?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract: {
+        ...answerContract,
+        subject: "관계를 개선하는 다음 행동",
+      },
+    })).toThrow(/질문의 대상이나 문제/);
+  });
+
+  it("rejects non-candidate verdicts that do not fulfill their answer kind", () => {
+    const cases = [
+      {
+        kind: "explain" as const,
+        decisive: false,
+        question: "왜 이 문제가 계속 반복될까?",
+        subject: "문제가 반복되는 원인",
+        value: "문제가 계속 반복돼요",
+      },
+      {
+        kind: "forecast" as const,
+        decisive: false,
+        question: "이직 시기는 언제일까?",
+        subject: "이직이 이루어질 시기",
+        value: "이직 가능성을 살펴봐요",
+      },
+      {
+        kind: "advice" as const,
+        decisive: true,
+        question: "관계를 개선하려면 어떻게 해야 해?",
+        subject: "관계를 개선할 행동",
+        value: "관계가 불안정해요",
+      },
+      {
+        kind: "analysis" as const,
+        decisive: false,
+        question: "현재 관계의 핵심은 뭐야?",
+        subject: "현재 관계의 핵심",
+        value: "현재 관계의 상태예요",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const incompleteResult: ReadingResult = {
+        ...baseResult,
+        verdict: {
+          kind: testCase.kind,
+          value: testCase.value,
+          statement: `${testCase.value}.`,
+        },
+        summary: `${testCase.value}. 카드 해석을 이어서 설명해요.`,
+      };
+      expect(() => enforceReadingQuality(incompleteResult, {
+        question: testCase.question,
+        language: "ko",
+        sourceSentences: [],
+        answerContract: {
+          kind: testCase.kind,
+          subject: testCase.subject,
+          candidates: [],
+          decisive: testCase.decisive,
+        },
+      })).toThrow(/원인·방향·행동·발견|해당 유형/);
+    }
+  });
+
+  it("accepts an explanation that states a new, topic-grounded cause", () => {
+    const statement = "반복되는 고민의 중심 원인은 확신을 얻으려는 마음이에요.";
+    const explanation: ReadingResult = {
+      ...baseResult,
+      verdict: {
+        kind: "explain",
+        value: "확신을 얻으려는 마음",
+        statement,
+      },
+      summary: `${statement} 카드의 경계 신호는 결정을 미루며 확실한 답을 반복해서 찾는 패턴과 연결돼요.`,
+    };
+
+    expect(enforceReadingQuality(explanation, {
+      question: "왜 같은 고민을 계속 반복할까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract: {
+        kind: "explain",
+        subject: "같은 고민을 반복하는 원인",
+        candidates: [],
+        decisive: false,
+      },
+    })).toBe(explanation);
+  });
+
+  it("rejects answer-kind markers whose payload is only a generic need to check", () => {
+    const cases = [
+      { kind: "forecast" as const, decisive: false, question: "이직은 어떻게 될까?", subject: "이직 전망", statement: "이직 전망은 확인이 필요해요." },
+      { kind: "explain" as const, decisive: false, question: "왜 관계 문제가 반복될까?", subject: "관계 문제가 반복되는 원인", statement: "관계 문제의 원인은 확인이 필요해요." },
+      { kind: "analysis" as const, decisive: false, question: "이 관계의 핵심은 뭐야?", subject: "관계의 핵심", statement: "관계의 핵심은 확인이 필요해요." },
+      { kind: "advice" as const, decisive: true, question: "관계에서 무엇을 해야 해?", subject: "관계에서 먼저 할 행동", statement: "관계에서 먼저 할 행동은 확인이 필요해요." },
+    ];
+
+    for (const testCase of cases) {
+      const emptyPayload: ReadingResult = {
+        ...baseResult,
+        verdict: {
+          kind: testCase.kind,
+          value: "확인이 필요해요",
+          statement: testCase.statement,
+        },
+        summary: `${testCase.statement} 카드 근거를 이어서 설명해요.`,
+      };
+      expect(() => enforceReadingQuality(emptyPayload, {
+        question: testCase.question,
+        language: "ko",
+        sourceSentences: [],
+        answerContract: {
+          kind: testCase.kind,
+          subject: testCase.subject,
+          candidates: [],
+          decisive: testCase.decisive,
+        },
+      })).toThrow(/실제 원인·방향·행동·발견/);
+    }
   });
 
   it("accepts concrete Korean tied to an everyday question", () => {
@@ -631,7 +1032,7 @@ describe("enforceReadingQuality", () => {
       language: "ko",
       sourceSentences: [cupsKnightExpected[0].sourceMeaning],
       expectedCards: cupsKnightExpected,
-    })).toThrow(/두 선택지에 없던 음식 특성/);
+    })).toThrow(/제공되지 않은 현실 특성/);
   });
 
   it("polishes literal AI phrasing in every reasoning section", () => {

@@ -225,7 +225,7 @@ export async function consumeAiCall(request: Request, env: RuntimeEnv, followup:
   const update = followup
     ? await env.DB.prepare(
       `UPDATE tarot_sessions
-       SET ai_calls = ai_calls + 1, followup_count = followup_count + 1
+       SET ai_calls = ai_calls + 1
        WHERE id_hash = ? AND expires_at >= ? AND ai_calls < 6 AND followup_count < 2`,
     ).bind(idHash, now).run()
     : await env.DB.prepare(
@@ -244,6 +244,36 @@ export async function consumeAiCall(request: Request, env: RuntimeEnv, followup:
     throw new ApiError(429, "FOLLOWUP_LIMIT_REACHED", "추가 질문은 한 리딩에서 최대 2회까지 가능합니다.");
   }
   throw new ApiError(429, "SESSION_LIMIT_REACHED", "이 리딩에서 사용할 수 있는 AI 요청을 모두 사용했습니다.");
+}
+
+export async function completeFollowup(
+  request: Request,
+  env: RuntimeEnv,
+  expectedFollowupCount: number,
+): Promise<void> {
+  assertSafeRequest(request);
+  const { idHash } = await verifySessionToken(request, env);
+
+  if (!env.DB) return;
+  await ensureSessionTable(env.DB);
+  const now = Math.floor(Date.now() / 1000);
+  const update = await env.DB.prepare(
+    `UPDATE tarot_sessions
+     SET followup_count = followup_count + 1
+     WHERE id_hash = ? AND expires_at >= ? AND followup_count = ? AND followup_count < 2`,
+  ).bind(idHash, now, expectedFollowupCount).run();
+
+  if ((update.meta.changes ?? 0) > 0) return;
+  const session = await env.DB.prepare(
+    "SELECT followup_count, expires_at FROM tarot_sessions WHERE id_hash = ?",
+  ).bind(idHash).first<{ followup_count: number; expires_at: number }>();
+  if (!session || session.expires_at < now) {
+    throw new ApiError(401, "SESSION_EXPIRED", "리딩 세션이 만료되었습니다.");
+  }
+  if (session.followup_count === expectedFollowupCount + 1) {
+    return;
+  }
+  throw new ApiError(429, "FOLLOWUP_LIMIT_REACHED", "추가 질문은 한 리딩에서 최대 2회까지 가능합니다.");
 }
 
 export function apiErrorResponse(error: unknown): Response {

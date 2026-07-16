@@ -57,6 +57,7 @@ import {
   orientationLabel,
   type DeckCard,
   type FollowupRecord,
+  type ReadingContext,
   type ReadingPlan,
   type ReadingResult,
   type SelectedCard,
@@ -102,6 +103,10 @@ interface AppNotice {
 const SESSION_KEY = "tarot-milktea-current-reading";
 const NICKNAME_KEY = "tarot-milktea-nickname";
 const LANGUAGE_KEY = "tarot-milktea-language";
+
+function hasAnswerContract(plan: ReadingPlan | null): boolean {
+  return Boolean((plan as Partial<ReadingPlan> | null)?.answerContract);
+}
 
 function localDateStamp(date = new Date()): string {
   const year = date.getFullYear();
@@ -181,12 +186,18 @@ function userError(error: unknown, language: AppLanguage = "ko"): string {
 
 function canUseLocalInterpretation(error: unknown): boolean {
   if (error instanceof TarotApiError) {
-    return error.status >= 500
-      || error.status === 0
+    return error.status === 0
       || error.code === "REQUEST_TIMEOUT"
       || error.code === "NETWORK_ERROR";
   }
-  return error instanceof Error && error.name === "ZodError";
+  return false;
+}
+
+function canGenerateLocalReading(plan: ReadingPlan): boolean {
+  const contract = (plan as Partial<ReadingPlan>).answerContract;
+  return Boolean(contract
+    && ["choose_one", "recommend_one", "yes_no", "compare"].includes(contract.kind)
+    && contract.candidates.length >= 2);
 }
 
 async function writeClipboard(text: string): Promise<void> {
@@ -497,7 +508,11 @@ export function TarotApp() {
       if (raw) {
         try {
           const saved = JSON.parse(raw) as RestorableState;
-          const restoredPhase = saved.phase === "question" && !saved.question && !saved.result
+          const unfinishedLegacyPlan = ["plan", "shuffling", "selecting", "interpreting"].includes(saved.phase)
+            && !hasAnswerContract(saved.activePlan);
+          const restoredPhase = unfinishedLegacyPlan
+            ? (saved.result ? "result" : "question")
+            : saved.phase === "question" && !saved.question && !saved.result
             ? "home"
             : saved.phase === "planning"
             ? (saved.result ? "result" : "question")
@@ -506,19 +521,27 @@ export function TarotApp() {
               : saved.phase;
           setPhase(restoredPhase);
           setQuestion(saved.question);
-          setActiveQuestion(saved.activeQuestion);
-          setInitialPlan(saved.initialPlan);
-          setActivePlan(saved.activePlan);
+          setActiveQuestion(unfinishedLegacyPlan
+            ? (saved.followups.at(-1)?.question ?? saved.question)
+            : saved.activeQuestion);
+          setInitialPlan(unfinishedLegacyPlan && !hasAnswerContract(saved.initialPlan) ? null : saved.initialPlan);
+          setActivePlan(unfinishedLegacyPlan
+            ? (saved.result && hasAnswerContract(saved.followups.at(-1)?.plan ?? null)
+              ? saved.followups.at(-1)?.plan ?? null
+              : null)
+            : saved.activePlan);
           setDeck(saved.deck);
-          setSelectedOrders(saved.selectedOrders);
+          setSelectedOrders(unfinishedLegacyPlan ? [] : saved.selectedOrders);
           setCards(saved.cards);
-          setLatestCards(saved.latestCards);
-          setPendingResult(saved.pendingResult ?? null);
-          setRevealCount(saved.revealCount ?? 0);
+          setLatestCards(unfinishedLegacyPlan && saved.result
+            ? (saved.followups.at(-1)?.addedCards ?? saved.latestCards)
+            : saved.latestCards);
+          setPendingResult(unfinishedLegacyPlan ? null : saved.pendingResult ?? null);
+          setRevealCount(unfinishedLegacyPlan ? 0 : saved.revealCount ?? 0);
           setResult(saved.result);
           setComparisonResult(saved.comparisonResult);
           setFollowups(saved.followups);
-          setRound(saved.round);
+          setRound(unfinishedLegacyPlan ? saved.followups.length : saved.round);
           setRecordId(saved.recordId);
           setApiMode(saved.apiMode);
           if (saved.phase === "revealing" && !saved.pendingResult) {
@@ -722,6 +745,16 @@ export function TarotApp() {
     });
   }
 
+  function readingContext(): ReadingContext | undefined {
+    if (round === 0) return undefined;
+    return {
+      initialQuestion: question,
+      previousQuestions: followups.map((item) => item.question),
+      previousAnswer: result?.verdict?.statement ?? result?.summary,
+      previousContract: followups.at(-1)?.plan?.answerContract ?? initialPlan?.answerContract,
+    };
+  }
+
   async function interpretCards() {
     if (!activePlan || selectedOrders.length !== activePlan.cardCount) return;
     const newCards = selectedOrders.map((order, index): SelectedCard => {
@@ -738,15 +771,20 @@ export function TarotApp() {
       };
     });
     const allCards = [...cards, ...newCards];
-    const promptQuestion = round === 0
-      ? question
-      : `처음 질문: ${question}\n추가 질문 ${round}: ${activeQuestion}`;
+    const context = readingContext();
 
     setError("");
     setPhase("interpreting");
     const minimumInterpretationTime = holdStage(800);
     try {
-      const response = await requestInterpretation(promptQuestion, allCards, round > 0 ? result ?? undefined : undefined, language);
+      const response = await requestInterpretation(
+        activeQuestion,
+        allCards,
+        round > 0 ? result ?? undefined : undefined,
+        language,
+        activePlan.answerContract,
+        context,
+      );
       await minimumInterpretationTime;
       setApiMode(response.mode);
       setLatestCards(newCards);
@@ -755,12 +793,16 @@ export function TarotApp() {
       setPhase("revealing");
     } catch (requestError) {
       await minimumInterpretationTime;
-      if (canUseLocalInterpretation(requestError)) {
+      if (
+        canUseLocalInterpretation(requestError)
+        && canGenerateLocalReading(activePlan)
+      ) {
         const fallback = generateReadingResult(
-          promptQuestion,
+          activeQuestion,
           allCards,
           round > 0 ? result ?? undefined : undefined,
           language,
+          activePlan.answerContract,
         );
         setApiMode("local");
         setLatestCards(newCards);
@@ -790,6 +832,7 @@ export function TarotApp() {
           addedCards: latestCards,
           previousResult: previous,
           result: pendingResult,
+          plan: activePlan ?? undefined,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -819,7 +862,13 @@ export function TarotApp() {
     setFollowupOpen(false);
     const minimumPlanningTime = holdStage(650);
     try {
-      const response = await requestReadingPlan(value, true, language);
+      const context: ReadingContext = {
+        initialQuestion: question,
+        previousQuestions: followups.map((item) => item.question),
+        previousAnswer: result?.verdict?.statement ?? result?.summary,
+        previousContract: followups.at(-1)?.plan?.answerContract ?? initialPlan?.answerContract,
+      };
+      const response = await requestReadingPlan(value, true, language, context);
       await minimumPlanningTime;
       setApiMode(response.mode);
       setActiveQuestion(value);
@@ -906,7 +955,7 @@ export function TarotApp() {
     setQuestion(saved.question);
     setActiveQuestion(saved.followups.at(-1)?.question ?? saved.question);
     setInitialPlan(saved.plan);
-    setActivePlan(saved.plan);
+    setActivePlan(saved.followups.at(-1)?.plan ?? saved.plan);
     setDeck(createSessionDeck());
     setCards(saved.cards);
     setLatestCards(saved.followups.at(-1)?.addedCards ?? saved.cards);

@@ -1,9 +1,13 @@
 import {
+  createAnswerContract,
   extractBinaryChoices,
+  extractChoiceCandidates,
   toKoreanHaeyo,
+  type AnswerContract,
   type BinaryChoices,
   type Orientation,
   type ReadingLanguage,
+  type ReadingContext,
   type ReadingPlan,
   type ReadingResult,
 } from "@/src/lib/tarot";
@@ -24,7 +28,7 @@ export interface ExpectedInterpretation {
 
 const DOMAIN_PATTERNS: Record<EverydayDomain, RegExp> = {
   food: /아침|점심|저녁|식사|메뉴|음식|먹|간식|끼니|배달|요리|장보기|breakfast|lunch|dinner|meal|menu|food|snack|cook|delivery/i,
-  outfit: /옷|코디|입을|입고|신발|겉옷|복장|outfit|clothes|wear|shoes|jacket/i,
+  outfit: /옷|코디|입(?:을|고|는|지|어)|신발|겉옷|복장|outfit|clothes|wear|shoes|jacket/i,
   schedule: /오늘\s*(?:뭐|무엇|할\s*일)|주말\s*일정|할\s*일|일정|약속|today(?:'s)?\s*(?:task|plan)|weekend\s*(?:plan|schedule)|to-?do/i,
 };
 
@@ -72,6 +76,32 @@ function normalize(value: string): string {
   return value.toLowerCase().replace(/[^0-9a-z가-힣]/g, "");
 }
 
+const TOPIC_STOPWORD = /^(?:나|내|저|제|우리|오늘|지금|요즘|이번|현재|자꾸|계속|그냥|정확히|먼저|다음|행동|질문|답|결론|무엇|무슨|어떤|어느|뭐|왜|어째서|이유|원인|어떻게|언제|알려|말해|봐|봐줘|해줘|하|해|해요|되|돼|있|없|좋|나을|할|될|일까|할까|될까|what|which|who|where|when|why|how|should|would|could|please|tell|show|question|answer|current|now|today|about)$/i;
+
+function topicalTokens(value: string): string[] {
+  return [...new Set((value.toLowerCase().match(/[가-힣a-z0-9]+/g) ?? [])
+    .map((token) => token
+      .replace(/(?:에서|으로|에게|부터|까지|처럼|보다|하고|이며|이라면|라면|인가|인지|일까|할까|될까|좋을까|나을까|해야|하면|하는|의|을|를|은|는|이|가|에|로|와|과|도|만)$/u, "")
+      .trim())
+    .filter((token) => token.length > 0 && !TOPIC_STOPWORD.test(token)))];
+}
+
+function hasTopicalConnection(value: string, subject: string): boolean {
+  const anchors = topicalTokens(subject);
+  if (anchors.length === 0) return true;
+  const normalizedValue = normalize(value);
+  return anchors.some((anchor) => normalizedValue.includes(normalize(anchor)));
+}
+
+function axisRepresentsCandidate(label: string, candidate: string): boolean {
+  const normalizedLabel = label.trim().toLowerCase();
+  const normalizedCandidate = candidate.trim().toLowerCase();
+  if (!normalizedLabel.startsWith(normalizedCandidate)) return false;
+  const remainder = normalizedLabel.slice(normalizedCandidate.length);
+  return remainder.length === 0
+    || /^(?:\s|[·:|/()[\]_-]|신호|선택|후보|signal|option)/iu.test(remainder);
+}
+
 function findDirectChoiceVerdict(summary: string, choices: BinaryChoices): string | null {
   const firstSentence = normalize(summary.split(/[.!?\n]/u)[0] ?? "");
   const selected = choices.filter((choice) => {
@@ -82,6 +112,156 @@ function findDirectChoiceVerdict(summary: string, choices: BinaryChoices): strin
     return /^(?:(?:을|를|쪽을)(?:바로|먼저|우선)?|(?:이|가))?(?:골라요|선택해요|추천해요|우선해요|먹어요|더나아요)/u.test(tail);
   });
   return selected.length === 1 ? selected[0] : null;
+}
+
+const CONTRACT_CHOICE_KINDS = new Set<AnswerContract["kind"]>(["choose_one", "recommend_one", "yes_no"]);
+const CONTRACT_CANDIDATE_KINDS = new Set<AnswerContract["kind"]>([...CONTRACT_CHOICE_KINDS, "compare"]);
+const CONTRACT_DECISIVENESS: Record<AnswerContract["kind"], boolean> = {
+  choose_one: true,
+  recommend_one: true,
+  yes_no: true,
+  compare: false,
+  forecast: false,
+  advice: true,
+  explain: false,
+  analysis: false,
+};
+const EXPLICIT_ANSWER_SHAPE: Partial<Record<AnswerContract["kind"], RegExp>> = {
+  choose_one: /골라|선택|하나만|pick|choose|which\s+(?:one|option)/iu,
+  recommend_one: /추천(?:해|해줘|해주세요)|(?:뭐|무엇|무슨|어떤).{0,28}(?:먹을까|입을까|살까|읽을까|볼까|갈까|고를까|주문할까)|recommend|(?:what|which).{0,24}should\s+i\s+(?:eat|wear|buy|read|watch|choose|pick)/iu,
+  yes_no: /할까\s*말까|예(?:\s*\/\s*|\s*아니면\s*)아니요|yes\s+or\s+no/iu,
+  compare: /비교|차이|장단점|compare|difference|pros?\s*(?:and|&)\s*cons?/iu,
+  forecast: /언제|시기|전망|향후|when|forecast|outlook/iu,
+  advice: /조언|방법|어떻게\s+(?:해야|하면)|what\s+should\s+i\s+do|advice|next\s+step/iu,
+  explain: /왜|이유|원인|어째서|why|reason|cause/iu,
+};
+const DEFERRED_ANSWER = /상황에 따라|조건(?:을|부터)? (?:더 )?확인|판단하기 어렵|결정하기 어렵|둘 다|경우에 따라|it depends|need more (?:context|information)|cannot decide|both options/i;
+const GENERIC_RECOMMENDATION = /^(?:적당한|알맞은|괜찮은|좋은|무난한|상황에 맞는|조건에 맞는|추천할 만한)?\s*(?:것|선택|선택지|방법|메뉴|음식|옷|행동|대안|옵션|option|choice|something|whatever fits)$/i;
+const GENERIC_ANSWER_TOKEN = /^(?:먼저|우선|현재|지금|이번|조금|좀|더|다음|천천히|신중한|신중하게|차분한|차분하게|그냥|일단|상황|흐름|조건|문제|부분|요소|방향|방향성|접근|상태|가능성|전체|전반|필요|중요|적절|다시|이후|그다음|게|것|수|current|situation|flow|condition|issue|factor|direction|approach|carefully|slowly|review|check|consider|decide|decision)$/i;
+const GENERIC_ANSWER_VERB = /^(?:살펴|확인|점검|고려|검토|파악|접근|결정|판단|생각|보여|좋|나)(?:[가-힣]*)$/u;
+const NOVELTY_GENERIC_TOKEN = /^(?:살펴|확인|점검|고려|검토|파악|접근|판단|생각|질문|답변|답|결론|가능|가능성|전망|시기|흐름|방향|변화|결과|상태|상황|조건|문제|원인|이유|핵심|중심|발견|행동|패턴|필요|중요|적절|신중|차분|확실|불확실|있|없|보이|나타나|무언가|뭔가)(?:[가-힣]*)$/u;
+const KIND_SEMANTIC_PATTERN: Partial<Record<AnswerContract["kind"], RegExp>> = {
+  explain: /원인|이유|때문|비롯|영향으로|because|reason|cause|stems?\s+from|driven\s+by|due\s+to/i,
+  forecast: /(?:\d+\s*(?:일|주|개월|달|년)|(?:이번|다음)\s*(?:주|달|주말)|봄|여름|가을|겨울|상반기|하반기|예상\s*시기|전망(?:은|이)|가장\s*가능성(?:이|은)\s*(?:큰|높은)|흐름(?:은|이).{0,40}(?:쪽|방향|증가|감소|이어|바뀌)|\blikely\b|\bexpected\b|\bwithin\b|\bnext\s+(?:week|month|year)\b|\btoward\b|\bincreas|\bdecreas)/iu,
+  advice: /(?:먼저|우선)\s*(?:할|해야|해볼)\s*(?:일|행동)(?:은|이)|\bfirst(?:\s+(?:action|step))?\b|start\s+by|you\s+should/i,
+  analysis: /핵심|중심|가장\s*중요|두드러진|main\s+(?:finding|pattern|issue)|key\s+(?:finding|pattern|issue)|central\s+(?:finding|pattern|issue)|most\s+important/i,
+};
+
+function hasSpecificAnswerContent(value: string): boolean {
+  if (/(?:\d+\s*(?:일|주|개월|달|년)|(?:이번|다음)\s*(?:주|달|주말)|봄|여름|가을|겨울|상반기|하반기)/u.test(value)) {
+    return true;
+  }
+  const tokens = value.match(/[가-힣A-Za-z0-9]+/g) ?? [];
+  return tokens.some((token) => {
+    const withoutParticle = token.replace(/(?:에서|으로|에게|부터|까지|처럼|보다|하고|이며|의|을|를|은|는|이|가|에|로|와|과|도|만)$/u, "");
+    return withoutParticle.length >= 2
+      && !GENERIC_ANSWER_TOKEN.test(withoutParticle)
+      && !GENERIC_ANSWER_VERB.test(withoutParticle);
+  });
+}
+
+function hasNovelAnswerContent(value: string, input: string): boolean {
+  const normalizedInput = normalize(input);
+  return topicalTokens(value).some((token) => (
+    !NOVELTY_GENERIC_TOKEN.test(token)
+    && !normalizedInput.includes(normalize(token))
+  ));
+}
+
+function answerContractIssues(
+  result: ReadingResult,
+  contract: AnswerContract,
+  question: string,
+): string[] {
+  const issues: string[] = [];
+  const verdict = result.verdict;
+  if (!verdict) return ["질문에 대한 직접 답을 verdict에 작성해야 한다."];
+  if (verdict.kind !== contract.kind) {
+    issues.push(`verdict.kind는 답변 계약의 ${contract.kind}와 같아야 한다.`);
+  }
+  const normalizedValue = normalize(verdict.value);
+  if (!normalizedValue || GENERIC_RECOMMENDATION.test(verdict.value.trim())) {
+    issues.push("verdict.value에는 범주나 판단 기준이 아니라 질문에 대한 구체적인 답을 써야 한다.");
+  }
+  if (!normalize(verdict.statement).includes(normalizedValue)) {
+    issues.push("verdict.statement에는 verdict.value를 직접 포함해야 한다.");
+  }
+  const firstSentence = result.summary.split(/[.!?\n]/u)[0] ?? "";
+  if (!normalize(firstSentence).includes(normalizedValue)) {
+    issues.push("summary 첫 문장에서 verdict.value를 직접 말해야 한다.");
+  }
+  if (!normalize(result.summary).startsWith(normalize(verdict.statement))) {
+    issues.push("summary는 verdict.statement로 시작해야 한다.");
+  }
+  if (contract.decisive && DEFERRED_ANSWER.test(`${verdict.statement} ${firstSentence}`)) {
+    issues.push("직접 결론을 요구한 질문에서 조건부 표현으로 답을 미루지 말아야 한다.");
+  }
+  if (!CONTRACT_CANDIDATE_KINDS.has(contract.kind) && !hasSpecificAnswerContent(verdict.value)) {
+    issues.push("verdict.value에는 어느 질문에나 붙일 수 있는 태도나 절차가 아니라 구체적인 원인·흐름·행동·발견을 써야 한다.");
+  }
+  if (
+    !CONTRACT_CANDIDATE_KINDS.has(contract.kind)
+    && !hasTopicalConnection(verdict.statement, `${contract.subject} ${question}`)
+  ) {
+    issues.push("verdict.statement에는 질문의 대상이나 문제를 직접 언급해 답이 무엇에 관한 것인지 분명히 해야 한다.");
+  }
+  if (
+    !CONTRACT_CANDIDATE_KINDS.has(contract.kind)
+    && !hasNovelAnswerContent(verdict.value, `${contract.subject} ${question}`)
+  ) {
+    issues.push("verdict.value는 질문을 다시 말하거나 확인하겠다고만 하지 말고, 질문에 없던 실제 원인·방향·행동·발견을 답으로 제시해야 한다.");
+  }
+  const semanticPattern = KIND_SEMANTIC_PATTERN[contract.kind];
+  if (semanticPattern && !semanticPattern.test(verdict.statement)) {
+    issues.push(`${contract.kind} 답변의 첫 문장은 해당 유형이 요구하는 원인·전망·우선 행동·핵심 발견을 명시해야 한다.`);
+  }
+  if (CONTRACT_CHOICE_KINDS.has(contract.kind)) {
+    const matches = contract.candidates.filter((candidate) => normalize(candidate) === normalizedValue);
+    if (matches.length !== 1) {
+      issues.push("선택·추천 답은 답변 계약의 후보 중 정확히 하나여야 한다.");
+    }
+    const selectedCandidate = matches[0];
+    const additionalStatementCandidates = contract.candidates.filter((candidate) => (
+      candidate !== selectedCandidate
+      && !normalize(selectedCandidate ?? "").includes(normalize(candidate))
+      && normalize(verdict.statement).includes(normalize(candidate))
+    ));
+    if (!selectedCandidate || additionalStatementCandidates.length > 0) {
+      issues.push("직접 답 문장에는 후보를 하나만 말해야 한다.");
+    }
+    if (!normalize(result.guidance.join(" ")).includes(normalizedValue)) {
+      issues.push("guidance에서도 이미 정한 답을 직접 실행하도록 써야 한다.");
+    }
+    const verdictAxis = result.axes.find((axis) => axisRepresentsCandidate(axis.label, verdict.value));
+    const otherCandidateScores = result.axes
+      .filter((axis) => contract.candidates.some((candidate) => (
+        normalize(candidate) !== normalizedValue && axisRepresentsCandidate(axis.label, candidate)
+      )))
+      .map((axis) => axis.score);
+    if (verdictAxis && otherCandidateScores.some((score) => score > verdictAxis.score)) {
+      issues.push("그래프에서는 최종 선택의 카드 신호가 다른 후보보다 낮게 표시되지 않아야 한다.");
+    }
+  } else if (contract.kind === "compare") {
+    const representedCandidates = contract.candidates.filter((candidate) => (
+      normalize(result.verdict?.statement ?? "").includes(normalize(candidate))
+      || normalize(result.summary).includes(normalize(candidate))
+    ));
+    if (representedCandidates.length !== contract.candidates.length) {
+      issues.push("비교 답변의 첫 부분에서 모든 비교 후보를 직접 언급해야 한다.");
+    }
+  }
+  if (CONTRACT_CANDIDATE_KINDS.has(contract.kind)) {
+    const candidateAxisCounts = contract.candidates.map((candidate) => (
+      result.axes.filter((axis) => axisRepresentsCandidate(axis.label, candidate)).length
+    ));
+    if (candidateAxisCounts.some((count) => count !== 1)) {
+      issues.push("그래프에는 후보마다 후보 이름을 쓴 카드 신호 축을 정확히 하나씩 만들어야 한다.");
+    }
+    if (result.axes.some((axis) => contract.candidates.filter((candidate) => axisRepresentsCandidate(axis.label, candidate)).length > 1)) {
+      issues.push("한 그래프 축에 여러 후보를 합치지 말아야 한다.");
+    }
+  }
+  return issues;
 }
 
 export function groundPositionConnection(value: string, positionTitle: string): string {
@@ -95,6 +275,7 @@ export function groundPositionConnection(value: string, positionTitle: string): 
 
 function appliedProseSections(result: ReadingResult): string[] {
   return [
+    result.verdict?.statement ?? "",
     result.summary,
     result.synthesis,
     ...result.guidance,
@@ -108,7 +289,7 @@ function appliedProseSections(result: ReadingResult): string[] {
   ].filter(Boolean);
 }
 
-const KOREAN_FORMAL_ENDING = /합니다|하십시오|됩니다|있습니다|없습니다|입니다/;
+const KOREAN_FORMAL_ENDING = /합니다|하십시오|됩니다|있습니다|없습니다|않습니다|못합니다|입니다/;
 const INTERNAL_SCHEMA_TERM = /position[_ ]?focus|position[_ ]?title|source[_ ]?meaning|question[_ ]?connection|decision[_ ]?impact|card[_ ]?interpretations|evidence[_ ]?card[_ ]?ids/i;
 
 const UNSUPPORTED_FOOD_CAUSALITY: RegExp[] = [
@@ -134,9 +315,15 @@ const FOOD_SPECIFIC_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegE
   { output: /강하게 당기는/, allowedByQuestion: /강하게|너무 먹고 싶|당기/ },
 ];
 
-const BINARY_FOOD_OPTION_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegExp }> = [
-  { output: /익숙한 (?:메뉴|식사|음식|재료)/, allowedByQuestion: /익숙|평소|자주/ },
-  { output: /(?:새로운|새) (?:메뉴|식사|음식|재료|조리 방식)/, allowedByQuestion: /새|새롭|처음|재료|조리/ },
+const CANDIDATE_OPTION_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegExp }> = [
+  {
+    output: /(?:익숙한|익숙해서|익숙하므로|익숙하니|낯익은)(?:\s+(?:메뉴|식사|음식|재료|후보|선택지|방법|장소|사람))?/,
+    allowedByQuestion: /익숙|낯익|평소|자주/,
+  },
+  {
+    output: /(?:(?:새로운|낯선)(?:\s+(?:메뉴|식사|음식|재료|조리 방식|후보|선택지|방법|장소|사람))?|새\s+(?:메뉴|식사|음식|재료|조리 방식|후보|선택지|방법|장소|사람))/,
+    allowedByQuestion: /새|새롭|처음|낯설|재료|조리/,
+  },
 ];
 
 const PHYSICAL_FOOD_POSITION = /포만|영양|소화|에너지|식욕|건강/;
@@ -162,12 +349,30 @@ export function detectEverydayDomain(question: string): EverydayDomain | null {
   return null;
 }
 
+export function resolveEverydayDomain(
+  question: string,
+  conversation?: ReadingContext,
+): EverydayDomain | null {
+  const currentDomain = detectEverydayDomain(question);
+  if (currentDomain) return currentDomain;
+  if (!conversation) return null;
+
+  const refersToEarlierAnswer = /^(?:그래서|결국)(?:\s|[,.:!?]|$)|(?:이|그|앞선|방금)\s*(?:결론|답|선택|해석)|추가로\s*(?:조심|주의|확인|볼|알)/u.test(question.trim());
+  if (!refersToEarlierAnswer) return null;
+
+  const priorScope = [
+    conversation.initialQuestion,
+    ...(conversation.previousQuestions ?? []),
+  ].filter((value): value is string => Boolean(value)).join("\n");
+  return detectEverydayDomain(priorScope);
+}
+
 export function questionScopeGuide(question: string, language: ReadingLanguage): string {
   const domain = detectEverydayDomain(question);
   if (!domain) {
     return language === "ko"
-      ? "질문에 적힌 범위 안에서만 해석하고, 언급되지 않은 상황이나 선택지를 만들어내지 않는다."
-      : "Stay within the scope of the question and do not invent unmentioned circumstances or options.";
+      ? "질문에 적힌 범위 안에서 해석한다. 추천 요청에는 구체적인 후보를 만들 수 있지만, 언급되지 않은 현실 상황이나 객관적 사실은 만들어내지 않는다."
+      : "Stay within the question's scope. A recommendation request may introduce concrete candidates, but it must not invent circumstances or objective facts.";
   }
 
   if (language !== "ko") {
@@ -175,9 +380,9 @@ export function questionScopeGuide(question: string, language: ReadingLanguage):
   }
 
   return ({
-    food: "식사에 관한 작은 일상 질문이다. 메뉴, 재료, 준비 시간, 조리 부담, 포만감처럼 오늘 식사에 바로 적용할 말만 사용한다. 인생·재정·조직·인간관계 이야기로 확대하지 않는다.",
-    outfit: "옷차림에 관한 작은 일상 질문이다. 날씨, 외출 목적, 활동량, 편안함처럼 오늘 옷을 고르는 데 바로 적용할 말만 사용한다.",
-    schedule: "일정에 관한 작은 일상 질문이다. 시간, 순서, 마감, 이동, 휴식처럼 오늘 실행에 바로 적용할 말만 사용한다.",
+    food: "식사에 관한 작은 일상 질문이다. 요청한 메뉴 선택이나 추천을 먼저 직접 답하고, 질문에 없는 영양·맛·신체 상태를 사실로 만들지 않는다.",
+    outfit: "옷차림에 관한 작은 일상 질문이다. 요청한 선택이나 추천을 먼저 직접 답하고, 질문에 없는 날씨·일정·신체 상태를 사실로 만들지 않는다.",
+    schedule: "일정에 관한 작은 일상 질문이다. 요청한 우선순위나 행동을 먼저 직접 답하고, 질문에 없는 마감·약속·외부 조건을 사실로 만들지 않는다.",
   })[domain];
 }
 
@@ -185,46 +390,125 @@ export function concreteWritingGuide(question: string, language: ReadingLanguage
   if (language !== "ko") return "Use concrete nouns and actions from the question in every interpretation section.";
   const domain = detectEverydayDomain(question);
   if (domain === "food") {
-    return `sourceMeaning에는 카드 원뜻을 보존한다. 그 밖의 결론과 적용 문장에서는 카드의 추상어를 식사 용어로 번역한다. 적용 문장에는 "방향성, 안정성, 지속 가능한, 자원, 성과, 책임, 장기적, 외부 조건, 실행 가능성, 요소, 종합적으로"를 쓰지 않는다. 대신 메뉴 결정, 재료, 준비 시간, 조리 부담, 포만감처럼 쓴다. 각 적용 문장에는 식사 관련 명사와 고른다·확인한다·피한다 같은 실제 행동을 함께 쓴다.`;
+    return `sourceMeaning에는 카드 원뜻을 보존한다. 그 밖의 문장에서는 추상어를 줄이고, 질문의 식사 대상과 고른다·먹는다·확인한다 같은 실제 행동을 사용한다. 질문에 없는 음식 속성을 새 근거로 만들지 않는다.`;
   }
   if (domain === "outfit") {
-    return "카드의 추상어를 옷차림 용어로 번역한다. 각 문장에는 옷·신발·기온·외출 목적 중 하나와 고른다·입는다·챙긴다 같은 실제 행동을 함께 쓴다.";
+    return "카드의 추상어를 질문에 나온 옷차림 대상과 고른다·입는다·챙긴다 같은 실제 행동으로 바꿔 쓴다. 질문에 없는 날씨나 외출 목적을 만들지 않는다.";
   }
   if (domain === "schedule") {
-    return "카드의 추상어를 일정 용어로 번역한다. 각 문장에는 시간·순서·마감·이동·휴식 중 하나와 시작한다·미룬다·확인한다 같은 실제 행동을 함께 쓴다.";
+    return "카드의 추상어를 질문에 나온 일정 대상과 시작한다·미룬다·확인한다 같은 실제 행동으로 바꿔 쓴다. 질문에 없는 마감이나 약속을 만들지 않는다.";
   }
   return "질문의 명사를 되풀이하기만 하지 말고, 카드가 어떤 판단 기준이나 행동으로 이어지는지 구체적으로 쓴다.";
 }
 
 export function enforcePlanQuality(
   plan: ReadingPlan,
-  context: { question: string; language: ReadingLanguage },
+  context: { question: string; language: ReadingLanguage; conversation?: ReadingContext },
 ): ReadingPlan {
-  if (context.language !== "ko") return plan;
+  let contract = plan.answerContract ?? createAnswerContract(context.question, undefined, context.language);
+  const expectedContract = createAnswerContract(context.question, context.conversation, context.language);
+  const candidatesWrittenInCurrentQuestion = extractChoiceCandidates(context.question);
+  const inheritedCandidates = !candidatesWrittenInCurrentQuestion
+    && (expectedContract.kind === "choose_one" || expectedContract.kind === "compare")
+    ? expectedContract.candidates
+    : null;
+  const userSuppliedCandidates = candidatesWrittenInCurrentQuestion ?? inheritedCandidates;
+  if (userSuppliedCandidates?.length) {
+    const comparisonOnly = expectedContract.kind === "compare";
+    contract = {
+      ...contract,
+      kind: comparisonOnly ? "compare" : "choose_one",
+      candidates: [...userSuppliedCandidates],
+      decisive: !comparisonOnly,
+    };
+  }
 
-  if (plan.positions.some((position) => GENERIC_PLAN_TITLE.test(position.title.trim()))) {
+  if (contract.kind === "choose_one" && !userSuppliedCandidates) {
+    const suppliedText = [
+      context.question,
+      context.conversation?.initialQuestion,
+      ...(context.conversation?.previousQuestions ?? []),
+    ].filter((value): value is string => Boolean(value)).join(" ");
+    const priorCandidates = context.conversation?.previousContract?.candidates ?? [];
+    const suppliedCandidateCount = contract.candidates.filter((candidate) => (
+      normalize(suppliedText).includes(normalize(candidate))
+      || priorCandidates.some((prior) => normalize(prior) === normalize(candidate))
+    )).length;
+    if (suppliedCandidateCount === 0) {
+      contract = { ...contract, kind: "recommend_one", decisive: true };
+    } else if (suppliedCandidateCount !== contract.candidates.length) {
+      throw new Error("사용자가 제시하지 않은 후보를 만든 경우 choose_one이 아니라 recommend_one으로 분류해야 한다.");
+    }
+  }
+
+  const explicitExpectedShape = EXPLICIT_ANSWER_SHAPE[expectedContract.kind]?.test(context.question) ?? false;
+  if (!userSuppliedCandidates && explicitExpectedShape && contract.kind !== expectedContract.kind) {
+    throw new Error(`질문이 요구한 답변 유형은 ${expectedContract.kind}이며 ${contract.kind}로 바꾸지 말아야 한다.`);
+  }
+  if (contract.decisive !== CONTRACT_DECISIVENESS[contract.kind]) {
+    throw new Error(`${contract.kind} 답변의 decisive 값이 답변 유형과 일치하지 않는다.`);
+  }
+  if (!CONTRACT_CANDIDATE_KINDS.has(contract.kind) && contract.candidates.length > 0) {
+    throw new Error(`${contract.kind} 답변에는 선택 후보를 임의로 추가하지 말아야 한다.`);
+  }
+  if (
+    !CONTRACT_CANDIDATE_KINDS.has(contract.kind)
+    && !hasTopicalConnection(contract.subject, context.question)
+  ) {
+    throw new Error("answerContract.subject에는 현재 질문의 대상이나 문제를 직접 포함해야 한다.");
+  }
+  if (contract.kind === "yes_no") {
+    const expectedYesNo = context.language === "ko" ? ["예", "아니요"] : ["yes", "no"];
+    if (contract.candidates.map(normalize).join("|") !== expectedYesNo.map(normalize).join("|")) {
+      throw new Error("yes_no 답변 후보는 출력 언어의 예·아니오 두 개여야 한다.");
+    }
+  }
+
+  const candidateMode = CONTRACT_CANDIDATE_KINDS.has(contract.kind);
+  const choiceMode = CONTRACT_CHOICE_KINDS.has(contract.kind);
+  let orderedPositions = plan.positions;
+  if (choiceMode && !contract.decisive) {
+    throw new Error("선택·추천 답변은 직접 결론을 내리도록 decisive=true여야 한다.");
+  }
+  if (contract.kind === "compare" && contract.decisive) {
+    throw new Error("비교만 요청한 답변은 한 후보를 강제로 고르지 않도록 decisive=false여야 한다.");
+  }
+  if (candidateMode) {
+    if (contract.candidates.length < 2 || contract.candidates.length > 5) {
+      throw new Error("선택·추천·비교 답변은 서로 다른 구체적 후보를 2~5개 만들어야 한다.");
+    }
+    if (new Set(contract.candidates.map(normalize)).size !== contract.candidates.length) {
+      throw new Error("답변 후보를 중복해서 만들지 말아야 한다.");
+    }
+    if (contract.candidates.some((candidate) => candidate.length > 28)) {
+      throw new Error("답변 후보 이름은 카드 자리에 표시할 수 있도록 28자 이하로 짧게 써야 한다.");
+    }
+    if (contract.candidates.some((candidate) => GENERIC_RECOMMENDATION.test(candidate.trim()))) {
+      throw new Error("답변 후보는 범주나 조건이 아니라 실제로 선택할 수 있는 구체적 대상이어야 한다.");
+    }
+    orderedPositions = contract.candidates.map((candidate, index) => ({
+      id: plan.positions[index]?.id || `candidate-${index + 1}`,
+      title: context.language === "ko" ? `${candidate} 선택` : `${candidate} option`,
+      focus: context.language === "ko"
+        ? `${candidate} 선택에 카드가 주는 지지와 주의 신호`
+        : `Support and caution signals for choosing ${candidate}`,
+    }));
+  }
+
+  if (context.language === "ko" && !candidateMode && plan.positions.some((position) => GENERIC_PLAN_TITLE.test(position.title.trim()))) {
     throw new Error("자리 이름이 질문과 무관한 일반 명사로만 작성되었다.");
   }
 
   const domain = detectEverydayDomain(context.question);
-  const choices = extractBinaryChoices(context.question);
-  if (choices) {
-    if (plan.cardCount !== 2 || plan.positions.length !== 2) {
-      throw new Error("두 선택지를 비교하는 질문은 선택지마다 한 장씩 정확히 2장으로 구성해야 한다.");
-    }
-    choices.forEach((choice, index) => {
-      if (!normalize(`${plan.positions[index]?.title ?? ""} ${plan.positions[index]?.focus ?? ""}`).includes(normalize(choice))) {
-        throw new Error(`카드 ${index + 1}의 자리에 선택지 "${choice}"를 직접 써야 한다.`);
-      }
-    });
-    const planText = plan.positions.map((position) => `${position.title} ${position.focus}`).join(" ");
+  if (context.language === "ko" && candidateMode && domain === "food") {
+    const planText = orderedPositions.map((position) => `${position.title} ${position.focus}`).join(" ");
     const inventedPhysicalTerm = ["맛", "맵", "포만", "영양", "소화", "칼로리", "재료", "조리", "가격", "비용", "시간"]
       .find((term) => planText.includes(term) && !context.question.includes(term));
     if (inventedPhysicalTerm) {
-      throw new Error("두 메뉴 비교 자리에서 질문에 없는 음식의 맛·영양·조리 특성을 예측 기준으로 만들지 말아야 한다.");
+      throw new Error("후보 비교 자리에서 질문에 없는 음식의 맛·영양·조리 특성을 예측 기준으로 만들지 말아야 한다.");
     }
   }
-  if (domain) {
+  if (context.language === "ko" && domain && !candidateMode) {
     const anchor = KOREAN_DOMAIN_ANCHORS[domain];
     if (!anchor.test(plan.interpretationFrame)) {
       throw new Error("리딩 구성이 일상 질문의 대상을 직접 언급하지 않는다.");
@@ -234,15 +518,36 @@ export function enforcePlanQuality(
     }
   }
 
-  return plan;
+  if (candidateMode) {
+    return {
+      ...plan,
+      answerContract: contract,
+      cardCount: contract.candidates.length,
+      interpretationFrame: context.language === "ko"
+        ? contract.kind === "compare"
+          ? "후보별 카드 신호를 비교해 핵심 차이를 설명해요."
+          : "후보별 카드 신호를 비교해 질문에 대한 답 하나를 정해요."
+        : contract.kind === "compare"
+          ? "Compare the card signal for each candidate and explain the key difference."
+          : "Compare the card signal for each candidate and choose one answer.",
+      selectionGuide: context.language === "ko"
+        ? "각 후보에 놓을 카드를 한 장씩 선택해요."
+        : "Select one card for each candidate.",
+      positions: orderedPositions,
+    };
+  }
+  return contract === plan.answerContract ? plan : { ...plan, answerContract: contract };
 }
 
 export function polishReadingLanguage(
   result: ReadingResult,
   question: string,
   language: ReadingLanguage,
+  domainOverride?: EverydayDomain | null,
 ): ReadingResult {
-  const domain = language === "ko" ? detectEverydayDomain(question) : null;
+  const domain = language === "ko"
+    ? (domainOverride === undefined ? detectEverydayDomain(question) : domainOverride)
+    : null;
   const food = domain === "food";
   const concreteDirectionTerm = domain ? ({
     food: "메뉴 선택 기준",
@@ -319,6 +624,11 @@ export function polishReadingLanguage(
 
   return {
     ...result,
+    verdict: result.verdict ? {
+      ...result.verdict,
+      value: result.verdict.value.replace(/\*\*|__|`/g, "").trim(),
+      statement: polish(result.verdict.statement),
+    } : undefined,
     summary: polish(result.summary),
     synthesis: polish(result.synthesis),
     guidance: result.guidance.map(polish),
@@ -348,6 +658,8 @@ export function enforceReadingQuality(
     language: ReadingLanguage;
     sourceSentences: string[];
     expectedCards?: ExpectedInterpretation[];
+    answerContract?: AnswerContract;
+    conversation?: ReadingContext;
   },
 ): ReadingResult {
   const issues: string[] = [];
@@ -389,6 +701,10 @@ export function enforceReadingQuality(
     });
   }
 
+  if (context.answerContract) {
+    issues.push(...answerContractIssues(result, context.answerContract, context.question));
+  }
+
   if (context.language !== "ko") {
     if (issues.length > 0) throw new Error(issues.join(" "));
     return result;
@@ -417,8 +733,30 @@ export function enforceReadingQuality(
     issues.push("카드 데이터 문장을 질문 맥락에 맞게 바꾸지 않고 복사했다.");
   }
 
-  const domain = detectEverydayDomain(context.question);
-  const binaryChoices = extractBinaryChoices(context.question);
+  const scopeQuestion = [
+    context.question,
+    context.answerContract?.subject,
+    context.conversation?.initialQuestion,
+    ...(context.conversation?.previousQuestions ?? []),
+  ].filter((value): value is string => Boolean(value)).join("\n");
+  const domain = resolveEverydayDomain(context.question, context.conversation);
+  const binaryChoices = context.answerContract ? null : extractBinaryChoices(context.question);
+  const candidateComparison = Boolean(binaryChoices
+    || (context.answerContract
+      && CONTRACT_CANDIDATE_KINDS.has(context.answerContract.kind)
+      && context.answerContract.candidates.length >= 2));
+  if (candidateComparison) {
+    const suppliedCandidateContext = [
+      scopeQuestion,
+      ...(expectedCards?.flatMap((card) => [card.positionTitle, card.positionFocus]) ?? []),
+    ].join(" ");
+    for (const assumption of CANDIDATE_OPTION_ASSUMPTIONS) {
+      const match = visibleText.match(assumption.output)?.[0];
+      if (match && !assumption.allowedByQuestion.test(suppliedCandidateContext)) {
+        issues.push(`후보에 관해 제공되지 않은 현실 특성 "${match}"을 만들어내지 말아야 한다.`);
+      }
+    }
+  }
   if (binaryChoices) {
     const verdict = findDirectChoiceVerdict(result.summary, binaryChoices);
     if (!verdict) {
@@ -447,20 +785,25 @@ export function enforceReadingQuality(
     }
     for (const expansion of SCOPE_EXPANSIONS) {
       const expansionMatches = [...new Set(visibleText.match(new RegExp(expansion.output.source, "g")) ?? [])];
-      if (expansionMatches.length > 0 && !expansion.allowedByQuestion.test(context.question)) {
+      if (expansionMatches.length > 0 && !expansion.allowedByQuestion.test(scopeQuestion)) {
         issues.push(`일상 질문에 없는 표현 ${expansionMatches.map((word) => `"${word}"`).join(", ")}을 쓰지 말고 질문 분야의 구체적인 말로 바꿔야 한다.`);
       }
     }
 
     const anchor = KOREAN_DOMAIN_ANCHORS[domain];
-    if (!anchor.test(result.summary) || !anchor.test(result.synthesis)) {
+    const contractCandidates = context.answerContract?.candidates ?? [];
+    const groundedInQuestion = (value: string) => (
+      anchor.test(value)
+      || contractCandidates.some((candidate) => normalize(value).includes(normalize(candidate)))
+    );
+    if (!groundedInQuestion(result.summary) || !groundedInQuestion(result.synthesis)) {
       issues.push("summary와 synthesis 모두 식사·옷·일정 등 질문 대상을 직접 언급해야 한다.");
     }
-    if (!anchor.test(result.guidance.join(" "))) {
+    if (!groundedInQuestion(result.guidance.join(" "))) {
       issues.push("guidance를 질문 대상에 직접 연결해야 한다.");
     }
     const ungroundedCards = result.cardInterpretations
-      .filter((item) => !item.reasoning || !anchor.test([
+      .filter((item) => !item.reasoning || !groundedInQuestion([
         item.text,
         item.reasoning.questionConnection,
         item.reasoning.decisionImpact,
@@ -478,7 +821,7 @@ export function enforceReadingQuality(
         issues.push(`근거 없는 식사 인과관계 "${unsupportedClaim}"을 만들지 말아야 한다. 준비 편의와 포만감은 별도 기준으로 설명한다.`);
       }
       const suppliedFoodContext = [
-        context.question,
+        scopeQuestion,
         ...(expectedCards?.flatMap((card) => [card.positionTitle, card.positionFocus]) ?? []),
       ].join(" ");
       for (const assumption of FOOD_SPECIFIC_ASSUMPTIONS) {
@@ -487,20 +830,19 @@ export function enforceReadingQuality(
           issues.push(`질문에 없는 음식 특성 "${match}"을 만들어내지 말아야 한다.`);
         }
       }
-      if (binaryChoices) {
-        for (const assumption of BINARY_FOOD_OPTION_ASSUMPTIONS) {
-          const match = visibleText.match(assumption.output)?.[0];
-          if (match && !assumption.allowedByQuestion.test(suppliedFoodContext)) {
-            issues.push(`두 선택지에 없던 음식 특성 "${match}"을 만들어내지 말아야 한다.`);
-          }
-        }
-      }
     }
 
     const axisText = result.axes.map((axis) => `${axis.label} ${axis.evidence}`).join(" ");
-    const matchedAxisAnchors = KOREAN_AXIS_ANCHORS[domain].filter((word) => axisText.includes(word));
-    if (new Set(matchedAxisAnchors).size < 2) {
-      issues.push("그래프 축을 일상 질문에 맞는 서로 다른 실제 기준으로 작성해야 한다.");
+    if (context.answerContract && CONTRACT_CANDIDATE_KINDS.has(context.answerContract.kind)) {
+      const representedCandidates = contractCandidates.filter((candidate) => normalize(axisText).includes(normalize(candidate)));
+      if (representedCandidates.length < Math.min(2, contractCandidates.length)) {
+        issues.push("그래프 축에 서로 다른 답변 후보의 카드 신호를 표시해야 한다.");
+      }
+    } else {
+      const matchedAxisAnchors = KOREAN_AXIS_ANCHORS[domain].filter((word) => axisText.includes(word));
+      if (new Set(matchedAxisAnchors).size < 2) {
+        issues.push("그래프 축을 일상 질문에 맞는 서로 다른 실제 기준으로 작성해야 한다.");
+      }
     }
   }
 
@@ -516,7 +858,7 @@ export function enforceReadingQuality(
         issues.push(`${expected.cardName}의 질문 연결 이유에 자리 이름 "${expected.positionTitle}"을 직접 써야 한다.`);
       }
       if (
-        detectEverydayDomain(context.question) === "food"
+        domain === "food"
         && isPhysicalFoodPosition(expected.positionTitle, expected.positionFocus)
       ) {
         const physicalReasoning = `${actual.reasoning.questionConnection} ${actual.reasoning.decisionImpact}`;

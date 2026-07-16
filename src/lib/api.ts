@@ -1,6 +1,6 @@
 import { readingPlanSchema, readingResultSchema } from "@/src/lib/schemas";
 import type { AppLanguage } from "@/src/lib/i18n";
-import type { ReadingPlan, ReadingResult, SelectedCard } from "@/src/lib/tarot";
+import type { AnswerContract, ReadingContext, ReadingPlan, ReadingResult, SelectedCard } from "@/src/lib/tarot";
 
 export type ApiMode = "ai" | "local";
 
@@ -58,11 +58,12 @@ export async function requestReadingPlan(
   question: string,
   followup = false,
   language: AppLanguage = "ko",
+  context?: ReadingContext,
 ): Promise<{ data: ReadingPlan; mode: ApiMode }> {
   const response = await fetchWithTimeout("/api/tarot", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "plan", question, followup, language }),
+    body: JSON.stringify({ action: "plan", question, followup, language, context }),
   }, 60_000);
   const payload = await parseResponse(response) as { data: unknown; mode?: ApiMode };
   return { data: readingPlanSchema.parse(payload.data), mode: payload.mode ?? "ai" };
@@ -73,11 +74,13 @@ export async function requestInterpretation(
   cards: SelectedCard[],
   previous?: ReadingResult,
   language: AppLanguage = "ko",
+  answerContract?: AnswerContract,
+  context?: ReadingContext,
 ): Promise<{ data: ReadingResult; mode: ApiMode }> {
   const response = await fetchWithTimeout("/api/tarot", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "interpret", question, cards, previous, language }),
+    body: JSON.stringify({ action: "interpret", question, cards, previous, language, answerContract, context }),
   }, 60_000);
   const payload = await parseResponse(response) as { data: unknown; mode?: ApiMode };
   return { data: readingResultSchema.parse(payload.data), mode: payload.mode ?? "ai" };

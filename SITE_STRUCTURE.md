@@ -79,7 +79,7 @@ AI 요청은 설계와 해석으로 분리한다.
 
 ### 4.1 카드 구성
 
-브라우저가 질문, 후속 질문 여부와 언어를 `/api/tarot`에 보낸다. 서버는 질문 범위와 카드 수를 검증한 뒤 Workers AI에 1~5장의 자리 구성을 요청한다.
+브라우저가 질문, 후속 질문 여부, 언어와 이전 답변 문맥을 `/api/tarot`에 보낸다. 서버는 질문 범위와 카드 수를 검증한 뒤 Workers AI에 1~5장의 자리 구성과 `answerContract`를 요청한다. 일반 질문의 의미 분류와 열린 추천 후보는 AI가 결정한다. 서버의 로컬 분류기는 AI를 사용할 수 없을 때 보조하고, 사용자가 “추천”, “왜”, “비교”처럼 요구 형태를 명시한 경우의 계약 오류만 제한적으로 검사한다. 사용자가 질문에 직접 적은 2~5개 선택지는 AI가 다른 후보로 바꾸지 못하도록 서버가 보존한다.
 
 응답 주요 필드:
 
@@ -89,21 +89,26 @@ AI 요청은 설계와 해석으로 분리한다.
 - `positions[].focus`
 - `interpretationFrame`
 - `selectionGuide`
+- `answerContract.kind`: `choose_one`, `recommend_one`, `yes_no`, `compare`, `forecast`, `advice`, `explain`, `analysis`
+- `answerContract.subject`, `answerContract.candidates`, `answerContract.decisive`
 
 ### 4.2 카드 해석
 
-브라우저가 질문, 선택 카드 ID, 정·역방향, 자리, 이전 결과와 언어를 전송한다. 서버는 선택된 카드의 로컬 의미 데이터만 프롬프트에 추가한다.
+브라우저가 질문, 선택 카드 ID, 정·역방향, 자리, 설계 단계의 `answerContract`, 이전 결과와 구조화된 후속 질문 문맥을 전송한다. 서버는 선택된 카드의 로컬 의미 데이터만 프롬프트에 추가한다.
 
 응답 주요 필드:
 
 - 종합 요약과 판단 기준
+- `verdict.kind`, `verdict.value`, `verdict.statement`: 질문이 요구한 형태의 직접 답
 - 카드별 원뜻, 질문 연결 근거와 판단 영향
 - 확인할 점
 - 신호 분포: 지지, 주의, 불확실성
 - 질문별 3~5개 해석 축과 근거 카드
 - 타로 해석의 한계 문구
 
-`src/lib/schemas.ts`의 Zod 스키마가 요청과 응답 형태를 검증하고, `src/lib/reading-quality.ts`가 한국어 구체성, 카드 근거, 질문 범위 이탈과 내부 필드 노출을 검사한다. 품질 검사를 통과하지 못한 AI 응답만 제한된 횟수로 재시도한다.
+`src/lib/schemas.ts`의 Zod 스키마가 요청과 응답 형태를 검증하고, `src/lib/reading-quality.ts`가 직접 답의 존재, 후보 보존, 첫 문장의 결론, 한국어 구체성, 카드 근거, 질문 범위 이탈과 내부 필드 노출을 검사한다. AI가 작성한 본문을 고정 문장으로 다시 만들지는 않는다. 카드 ID·방향·원뜻·원자료 표시는 서버 데이터로 고정하고, 품질 검사를 통과하지 못한 AI 응답만 오류 이유와 함께 제한된 횟수로 재시도한다.
+
+후속 질문은 이전 질문을 문자열로 합치지 않고 `initialQuestion`, `previousQuestions`, `previousAnswer`, `previousContract`로 전달한다. “그래서 정확히 어느 쪽” 같은 질문은 이전 후보를 이어받고, 새로운 대상의 질문은 이전 후보나 그래프 축을 상속하지 않는다.
 
 ## 5. 데이터와 저장 경계
 

@@ -46,6 +46,7 @@ export interface ReadingPlan {
   interpretationFrame: string;
   selectionGuide: string;
   positions: ReadingPosition[];
+  answerContract: AnswerContract;
 }
 
 export interface SelectedCard {
@@ -84,6 +85,7 @@ export interface ReadingSignals {
 }
 
 export interface ReadingResult {
+  verdict?: ReadingVerdict;
   summary: string;
   cardInterpretations: CardInterpretation[];
   synthesis: string;
@@ -99,12 +101,34 @@ export interface FollowupRecord {
   addedCards: SelectedCard[];
   previousResult: ReadingResult;
   result: ReadingResult;
+  plan?: ReadingPlan;
   createdAt: string;
 }
 
 export type QuestionCategory = "relationship" | "work" | "decision" | "self";
 export type ReadingLanguage = "ko" | "en";
 export type BinaryChoices = [string, string];
+export type AnswerKind = "choose_one" | "recommend_one" | "yes_no" | "compare" | "forecast" | "advice" | "explain" | "analysis";
+
+export interface AnswerContract {
+  kind: AnswerKind;
+  subject: string;
+  candidates: string[];
+  decisive: boolean;
+}
+
+export interface ReadingVerdict {
+  kind: AnswerKind;
+  value: string;
+  statement: string;
+}
+
+export interface ReadingContext {
+  initialQuestion?: string;
+  previousQuestions?: string[];
+  previousAnswer?: string;
+  previousContract?: AnswerContract;
+}
 
 const fileByTitle = new Map(
   imageManifest.assets
@@ -160,9 +184,17 @@ function cleanChoiceLabel(value: string): string {
   return value
     .trim()
     .replace(/^["'“”‘’([{]+|["'“”‘’\])}]+$/g, "")
+    .replace(/^(?:or|또는|혹은|아니면)\s+/iu, "")
     .replace(/^(?:오늘|지금|이번(?:에는|엔)?|나는|내가|제가)\s+/u, "")
     .replace(/(?:을|를|은|는)$/u, "")
     .trim();
+}
+
+function questionSegments(question: string): string[] {
+  return question
+    .split(/\n(?:추가 질문\s*\d+|follow-up question\s*\d+)\s*:\s*/iu)
+    .map((segment) => segment.replace(/^(?:처음 질문|initial question)\s*:\s*/iu, "").trim())
+    .filter(Boolean);
 }
 
 function koreanCopula(value: string): string {
@@ -173,16 +205,21 @@ function koreanCopula(value: string): string {
   return `${value}${hasFinal ? "이에요" : "예요"}`;
 }
 
-export function extractBinaryChoices(question: string): BinaryChoices | null {
-  const scope = question
-    .split(/\n(?:추가 질문\s*\d+|follow-up question\s*\d+)\s*:\s*/iu)
-    .at(-1)
-    ?.trim() ?? question.trim();
+function extractBinaryChoicesFromSegment(scope: string): BinaryChoices | null {
   const repeatedPredicate = scope.match(
     /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,35}?)(?:을|를)?\s+(먹을지|고를지|선택할지|할지)\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,35}?)(?:을|를)?\s+\2/u,
   );
+  const repeatedQuestion = scope.match(
+    /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,35}?)(?:을|를)?\s+(먹을까|고를까|선택할까|할까)\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,35}?)(?:을|를)?\s+\2/u,
+  );
   const amongChoices = scope.match(
-    /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)(?:와|과)\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)\s+중/u,
+    /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)(?:이랑|랑|와|과)\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)\s+중/u,
+  );
+  const comparisonChoices = scope.match(
+    /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)(?:이랑|랑|와|과)\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)(?:의)?\s+(?:차이|장단점|비교)/u,
+  );
+  const alternativeChoices = scope.match(
+    /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)\s+아니면\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)\s+(?:뭐|무엇|어느|어떤)/u,
   );
   const versusChoices = scope.match(
     /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)\s+(?:vs\.?|대)\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)(?:[?.!]|$)/iu,
@@ -190,15 +227,36 @@ export function extractBinaryChoices(question: string): BinaryChoices | null {
   const englishChoices = scope.match(
     /\b(?:choose|pick|have|eat)\s+([^?.,]{1,30}?)\s+or\s+([^?.,]{1,30}?)(?:[?.!]|$)/iu,
   );
+  const englishShouldChoices = scope.match(
+    /\b(?:should|shall)\s+i\s+([^?.,:;—–-]{1,30}?)\s+or\s+([^?.,:;—–-]{1,30}?)(?:[?.!]|$)/iu,
+  );
+  const englishTrailingChoices = scope.match(
+    /(?:^|[?:]\s*)([^?.,:;—–-]{1,30}?)\s+or\s+([^?.,:;—–-]{1,30}?)\s*(?:[—–,:-]\s*)?which(?:\s+one)?\s+(?:should\s+i\s+)?(?:choose|pick)/iu,
+  );
+  const englishComparisonChoices = scope.match(
+    /\bcompare\s+([^?.,:;—–-]{1,30}?)\s+(?:and|with|versus|vs\.?)\s+([^?.,:;—–-]{1,30}?)(?:[?.!]|$)/iu,
+  );
   const matched = repeatedPredicate
     ? [repeatedPredicate[1], repeatedPredicate[3]]
-    : amongChoices
-      ? [amongChoices[1], amongChoices[2]]
-      : versusChoices
-        ? [versusChoices[1], versusChoices[2]]
-        : englishChoices
-          ? [englishChoices[1], englishChoices[2]]
-          : null;
+    : repeatedQuestion
+      ? [repeatedQuestion[1], repeatedQuestion[3]]
+      : amongChoices
+        ? [amongChoices[1], amongChoices[2]]
+        : comparisonChoices
+          ? [comparisonChoices[1], comparisonChoices[2]]
+          : alternativeChoices
+            ? [alternativeChoices[1], alternativeChoices[2]]
+            : versusChoices
+              ? [versusChoices[1], versusChoices[2]]
+              : englishShouldChoices
+                ? [englishShouldChoices[1], englishShouldChoices[2]]
+                : englishTrailingChoices
+                  ? [englishTrailingChoices[1], englishTrailingChoices[2]]
+                  : englishComparisonChoices
+                    ? [englishComparisonChoices[1], englishComparisonChoices[2]]
+                    : englishChoices
+                      ? [englishChoices[1], englishChoices[2]]
+                      : null;
   if (!matched) return null;
 
   const choices = matched.map(cleanChoiceLabel) as BinaryChoices;
@@ -206,9 +264,141 @@ export function extractBinaryChoices(question: string): BinaryChoices | null {
   return choices;
 }
 
+function extractListedChoicesFromSegment(scope: string): string[] | null {
+  const koreanList = scope.match(
+    /(?:^|[?:]\s*)([^?!\n]{3,140}?)\s+중(?:에서)?\s*(?:하나|한 가지|어느|어떤|어디|뭐|무엇|골라|선택|추천|비교|차이)/iu,
+  );
+  const englishList = scope.match(
+    /\b(?:choose|pick|compare|which(?:\s+one)?(?:\s+of)?)\s+(?:between\s+)?([^?!\n]{3,140}?)(?:[?.!]|$)/iu,
+  );
+  const englishTrailingList = scope.match(
+    /(?:^|[?:]\s*)([^?!\n]{3,140}?)\s*:\s*which(?:\s+one)?\s+(?:should\s+i\s+)?(?:choose|pick)/iu,
+  );
+  const raw = koreanList?.[1] ?? englishTrailingList?.[1] ?? englishList?.[1];
+  if (!raw) return null;
+  const separators = /\s*(?:,|\/|·|;|\s+(?:또는|혹은|아니면|or)\s+)\s*/iu;
+  let pieces = raw.split(separators);
+  if (pieces.length < 2 && /(?:와|과)\s+/u.test(raw)) {
+    pieces = raw.split(/(?:와|과)\s+/u);
+  }
+  const choices = pieces
+    .map((piece, index) => cleanChoiceLabel(index === 0
+      ? piece
+        .replace(/^.*?:\s*/u, "")
+        .replace(/^[^,;/·]{1,30}?(?:은|는)\s+/u, "")
+      : piece))
+    .filter((choice) => choice.length >= 1 && choice.length <= 28);
+  if (choices.length < 2 || choices.length > 5) return null;
+  if (new Set(choices.map((choice) => choice.toLowerCase())).size !== choices.length) return null;
+  return choices;
+}
+
+export function extractChoiceCandidates(question: string): string[] | null {
+  const segments = questionSegments(question);
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const choices = extractListedChoicesFromSegment(segments[index])
+      ?? extractBinaryChoicesFromSegment(segments[index]);
+    if (choices) return choices;
+  }
+  return null;
+}
+
+export function extractBinaryChoices(question: string): BinaryChoices | null {
+  const choices = extractChoiceCandidates(question);
+  return choices?.length === 2 ? [choices[0], choices[1]] : null;
+}
+
+function latestQuestion(question: string): string {
+  return questionSegments(question).at(-1) ?? question.trim();
+}
+
+function refersToPriorDecision(question: string): boolean {
+  const normalized = question.trim().toLowerCase();
+  const explicitReference = /결론(?:은|이)?|(?:뭐|무엇|어느)\s*(?:가|이)?\s*답|정확히.{0,12}하나만|하나만\s*(?:말|골라|정해)|둘 중|그중|어느\s*(?:쪽|걸|것)|뭘\s*(?:골라|선택|정해)|무엇으로|뭘로|(?:먹|입|고르|선택|하)라는\s*(?:거|것)|which one|so which|exactly which|between them/iu.test(normalized);
+  if (explicitReference) return true;
+  const startsAsContinuation = /^(?:그래서|그럼|그러면|결국)(?:\s|[,.:!?]|$)/u.test(normalized);
+  const introducesNewTarget = /(?:내일|모레|다음\s*(?:날|주|달)|새로운|다른).{0,24}(?:뭐|무엇|무슨|어떤)|(?:뭐|무엇|무슨|어떤).{0,18}(?:입|읽|살|갈|할).{0,10}(?:좋|추천)/u.test(normalized);
+  return startsAsContinuation && !introducesNewTarget;
+}
+
+export function createAnswerContract(
+  question: string,
+  context?: ReadingContext,
+  language: ReadingLanguage = "ko",
+): AnswerContract {
+  const current = latestQuestion(question);
+  const inherited = context?.previousContract;
+  const contextualQuestions = [
+    context?.initialQuestion,
+    ...(context?.previousQuestions ?? []),
+  ].filter((value): value is string => Boolean(value));
+  const inheritedCandidates = inherited?.candidates.length && inherited.candidates.length <= 5
+    ? [...inherited.candidates]
+    : null;
+  const explicitChoices = extractChoiceCandidates(current)
+    ?? (refersToPriorDecision(current)
+      ? (inheritedCandidates ?? extractChoiceCandidates(contextualQuestions.join("\n")))
+      : null);
+  const normalized = current.toLowerCase();
+  const asksForExplanation = /왜|이유|원인|어째서|why|reason|cause/iu.test(normalized);
+  const asksForChoice = /골라|선택|정해|어느\s*쪽|뭘로|무엇으로|하나만|pick|choose|which\s+(?:one|option)|decide/iu.test(normalized);
+  const asksToCompare = /비교|차이|장단점|compare|difference|pros?\s*(?:and|&)\s*cons?/iu.test(normalized);
+
+  // A sentence-level request such as "why do I keep wondering what to eat?"
+  // is asking for a cause, not for the embedded food choice to be made.
+  if (asksForExplanation) {
+    return { kind: "explain", subject: current.slice(0, 100), candidates: [], decisive: false };
+  }
+
+  if (explicitChoices && (asksForChoice || !asksToCompare)) {
+    return {
+      kind: "choose_one",
+      subject: language === "ko" ? "제시된 선택지 중 최종 선택" : "the final choice among the supplied options",
+      candidates: [...explicitChoices],
+      decisive: true,
+    };
+  }
+  if (explicitChoices && asksToCompare) {
+    return {
+      kind: "compare",
+      subject: language === "ko" ? "제시된 선택지의 차이" : "the difference between the supplied options",
+      candidates: [...explicitChoices],
+      decisive: false,
+    };
+  }
+  const englishOpenQuestion = /\b(?:what|how|where|when|which)\s+should\s+i\b/iu.test(normalized);
+  const asksForOpenRecommendation = /추천(?:해|해줘|해주세요|받|할)|(?:뭐|무엇|무슨|어떤).{0,28}(?:좋을까|나을까|먹을까|입을까|살까|읽을까|볼까|갈까|고를까|선택할까|주문할까|할까)|recommend|(?:what|which)\s+(?:book|movie|menu|meal|outfit|option|one)?\s*should\s+i\s+(?:eat|wear|buy|read|watch|choose|pick)|what\s+should\s+i\s+(?:eat|wear|buy|read|watch)|pick\s+(?:for|me)/iu.test(normalized);
+  if (asksForOpenRecommendation) {
+    return {
+      kind: "recommend_one",
+      subject: current.slice(0, 100),
+      candidates: refersToPriorDecision(current) && inherited?.candidates.length ? [...inherited.candidates] : [],
+      decisive: true,
+    };
+  }
+  if (/할까\s*말까|해도\s*될까|맞을까|아닐까|가능할까|될까요|(?:하는|가는|사는)\s*(?:게|것이)\s*(?:좋을|나을)까|(?:연락|이직|지원|신청|구매|시작|중단|계속)(?:을|를)?\s*할까|(?:만날|보낼|갈|먹을|입을|살)까|will\s+it|is\s+it\s+(?:right|okay)|yes\s+or\s+no/iu.test(normalized)
+    || (!englishOpenQuestion && /\bshould\s+i\b/iu.test(normalized))) {
+    return {
+      kind: "yes_no",
+      subject: current.slice(0, 100),
+      candidates: language === "ko" ? ["예", "아니요"] : ["Yes", "No"],
+      decisive: true,
+    };
+  }
+  if (/언제|시기|될까|어떻게\s+될|가능성|전망|미래|앞으로|향후|다음.{0,12}흐름|when|likely|forecast|outlook|what\s+will/iu.test(normalized)) {
+    return { kind: "forecast", subject: current.slice(0, 100), candidates: [], decisive: false };
+  }
+  if (/어떻게|방법|해야\s*해|하면\s*좋|조언|다음\s*행동|how|what\s+should\s+i\s+do|advice|next\s+step/iu.test(normalized)) {
+    return { kind: "advice", subject: current.slice(0, 100), candidates: [], decisive: true };
+  }
+  return { kind: "analysis", subject: current.slice(0, 100), candidates: [], decisive: false };
+}
+
 export function toKoreanHaeyo(value: string): string {
   const sentenceEnd = "(?=[.!?]|$)";
   return value
+    .replace(new RegExp(`않습니다${sentenceEnd}`, "g"), "않아요")
+    .replace(new RegExp(`못합니다${sentenceEnd}`, "g"), "못해요")
     .replace(new RegExp(`않았다${sentenceEnd}`, "g"), "않았어요")
     .replace(new RegExp(`필요해진다${sentenceEnd}`, "g"), "필요해져요")
     .replace(new RegExp(`줄어든다${sentenceEnd}`, "g"), "줄어들어요")
@@ -328,26 +518,37 @@ const POSITION_LIBRARY_EN: Record<QuestionCategory, ReadingPosition[]> = {
   ],
 };
 
-export function designReading(question: string, followup = false, language: ReadingLanguage = "ko"): ReadingPlan {
+export function designReading(
+  question: string,
+  followup = false,
+  language: ReadingLanguage = "ko",
+  context?: ReadingContext,
+): ReadingPlan {
   const category = detectQuestionCategory(question);
-  const choices = extractBinaryChoices(question);
-  if (choices) {
-    const positions = choices.map((choice, index) => ({
+  const answerContract = createAnswerContract(question, context, language);
+  const candidateMode = ["choose_one", "recommend_one", "yes_no", "compare"].includes(answerContract.kind);
+  if (candidateMode && answerContract.candidates.length >= 2) {
+    const positions = answerContract.candidates.slice(0, 5).map((candidate, index) => ({
       id: `${followup ? "followup" : "initial"}-${index + 1}-option`,
-      title: language === "ko" ? `${choice} 메뉴 선택` : `${choice} option`,
+      title: language === "ko" ? `${candidate} 선택` : `${candidate} option`,
       focus: language === "ko"
-        ? `${choice} 메뉴 선택에 카드가 주는 지지와 주의 신호`
-        : `Support and caution signals for choosing ${choice}`,
+        ? `${candidate} 선택에 카드가 주는 지지와 주의 신호`
+        : `Support and caution signals for choosing ${candidate}`,
     }));
     return {
-      cardCount: 2,
+      cardCount: positions.length,
       interpretationFrame: language === "ko"
-        ? `${choices[0]}와 ${choices[1]} 중 카드 배열이 더 지지하는 메뉴를 비교해요.`
-        : `Compare which option the spread supports more: ${choices[0]} or ${choices[1]}.`,
+        ? answerContract.kind === "compare"
+          ? "후보별 카드 신호를 비교해 핵심 차이를 설명해요."
+          : "후보별 카드 신호를 비교해 질문에 대한 답 하나를 정해요."
+        : answerContract.kind === "compare"
+          ? "Compare the card signal for each candidate and explain the key difference."
+          : "Compare the card signal for each candidate and choose one answer.",
       selectionGuide: language === "ko"
-        ? "각 메뉴에 놓을 카드를 한 장씩 선택해요."
+        ? "각 후보에 놓을 카드를 한 장씩 선택해요."
         : "Select one card for each option.",
       positions,
+      answerContract,
     };
   }
   const cardCount = requestedCardCount(question, followup);
@@ -373,12 +574,17 @@ export function designReading(question: string, followup = false, language: Read
     interpretationFrame: language === "ko" ? `${categoryFrame} ${cardCount}장의 카드를 분석해요.` : `${categoryFrame}, using ${cardCount} card${cardCount === 1 ? "" : "s"}.`,
     selectionGuide: language === "ko" ? `아래 카드 중 ${cardCount}장을 선택해요. 선택 순서대로 각 자리에 배치돼요.` : `Select ${cardCount} card${cardCount === 1 ? "" : "s"} below. Cards are assigned by selection order.`,
     positions,
+    answerContract,
   };
 }
 
 function readingResultToHaeyo(result: ReadingResult): ReadingResult {
   return {
     ...result,
+    verdict: result.verdict ? {
+      ...result.verdict,
+      statement: toKoreanHaeyo(result.verdict.statement),
+    } : undefined,
     summary: toKoreanHaeyo(result.summary),
     synthesis: toKoreanHaeyo(result.synthesis),
     guidance: result.guidance.map(toKoreanHaeyo),
@@ -400,52 +606,97 @@ function readingResultToHaeyo(result: ReadingResult): ReadingResult {
   };
 }
 
-function generateBinaryChoiceResult(
+function generateCandidateResult(
   question: string,
-  choices: BinaryChoices,
+  contract: AnswerContract,
   selectedCards: SelectedCard[],
+  language: ReadingLanguage,
 ): ReadingResult {
-  const comparedCards = selectedCards.slice(0, 2);
-  const scores = comparedCards.map((selected) => {
+  const candidates = contract.candidates.slice(0, 5);
+  const comparedCards = selectedCards.slice(0, Math.max(1, candidates.length));
+  const scores = candidates.map((candidate, index) => {
+    const selected = comparedCards[index % comparedCards.length];
     const card = getCard(selected.cardId);
     const hierarchyWeight = card.arcana === "major" ? 10 : card.rank ? 6 : 3;
     const orientationBase = selected.reversed ? 43 - hierarchyWeight : 61 + hierarchyWeight;
-    return clampScore(orientationBase);
+    return clampScore(orientationBase + (hashText(`${question}|${candidate}`) % 5));
   });
-  let winnerIndex = scores[0] > scores[1] ? 0 : 1;
-  if (scores[0] === scores[1]) {
-    winnerIndex = hashText(`${question}|${comparedCards.map((card) => card.cardId).join("|")}`) % 2;
-    scores[winnerIndex] += 1;
+  const highest = Math.max(...scores);
+  const tied = scores.flatMap((score, index) => score === highest ? [index] : []);
+  const winnerIndex = tied[hashText(`${question}|${comparedCards.map((card) => card.cardId).join("|")}`) % tied.length];
+  if (tied.length > 1) {
+    scores[winnerIndex] = clampScore(scores[winnerIndex] + 1);
   }
-  const loserIndex = winnerIndex === 0 ? 1 : 0;
-  const winner = choices[winnerIndex];
-  const difference = Math.abs(scores[0] - scores[1]);
+  const winner = candidates[winnerIndex];
+  const sortedScores = [...scores].sort((left, right) => right - left);
+  const difference = Math.max(1, sortedScores[0] - (sortedScores[1] ?? sortedScores[0] - 1));
   const uncertainty = Math.max(12, 28 - difference);
   const support = Math.min(72, 54 + difference);
   const caution = 100 - support - uncertainty;
+  const comparisonMode = contract.kind === "compare";
+  const comparisonValue = candidates.map((candidate, index) => {
+    const selected = comparedCards[index % comparedCards.length];
+    const card = getCard(selected.cardId);
+    const meaning = card[selected.reversed ? "reversed" : "upright"];
+    return `${candidate}: ${meaning.keywords[0]}`;
+  }).join(language === "ko" ? " · " : "; ");
+  const verdictValue = comparisonMode && comparisonValue.length > 160
+    ? (language === "ko" ? "후보별 카드 신호의 핵심 차이" : "the key card-signal contrast among the candidates")
+    : comparisonValue;
+  const statement = language === "ko"
+    ? comparisonMode
+      ? `카드에서 드러난 핵심 차이는 ${koreanCopula(comparisonValue)}.`
+      : contract.kind === "recommend_one"
+      ? `이번 카드 배열의 추천은 “${winner}”이에요.`
+      : contract.kind === "yes_no"
+        ? `이번 카드 배열의 답은 “${winner}”예요.`
+        : `이번 카드 배열에서는 “${winner}” 쪽을 골라요.`
+    : comparisonMode
+      ? `The key contrast in the cards is ${comparisonValue}.`
+      : contract.kind === "recommend_one"
+      ? `The recommendation from this spread is “${winner}.”`
+      : contract.kind === "yes_no"
+        ? `The answer from this spread is “${winner}.”`
+        : `Choose “${winner}” in this spread.`;
   const cardInterpretations = comparedCards.map((selected, index): CardInterpretation => {
     const card = getCard(selected.cardId);
     const orientation: Orientation = selected.reversed ? "reversed" : "upright";
     const meaning = card[orientation];
-    const option = choices[index];
+    const candidate = candidates[index % candidates.length];
     const isWinner = index === winnerIndex;
-    const signalTier = card.arcana === "major" ? "메이저 아르카나" : card.rank ? "코트 카드" : "마이너 아르카나";
-    const supportsOption = orientation === "upright";
+    if (language === "en") {
+      return {
+        cardId: card.id,
+        positionTitle: selected.positionTitle,
+        orientation,
+        text: comparisonMode
+          ? `${candidate} is characterized by the ${meaning.keywords[0]} signal in this comparison.`
+          : isWinner ? `${candidate} receives the strongest card signal.` : `${candidate} receives a weaker or more cautious signal.`,
+        reasoning: {
+          sourceMeaning: `${card.nameEn} ${orientation}: ${meaning.summary}`,
+          questionConnection: `In the ${selected.positionTitle} position, the card's ${meaning.keywords.slice(0, 2).join(" and ")} themes are used as a comparative tarot signal for ${candidate}.`,
+          decisionImpact: comparisonMode
+            ? `This signal distinguishes ${candidate} from the other candidates without declaring it objectively better.`
+            : isWinner ? `This signal makes ${candidate} the direct answer to the user's request.` : `This signal does not outweigh the stronger support for ${winner}.`,
+        },
+        evidence: [`${orientation} · ${meaning.keywords.slice(0, 2).join(" · ")}`, `Position · ${selected.positionTitle}`],
+      };
+    }
     return {
       cardId: card.id,
       positionTitle: selected.positionTitle,
       orientation,
-      text: isWinner
-        ? `${option} 메뉴 쪽이 두 카드 중 더 강하게 지지돼요.`
-        : supportsOption
-          ? `${option} 메뉴도 지지되지만 상대 카드의 신호가 더 강해요.`
-          : `${option} 메뉴 쪽에는 주의 신호가 나타나요.`,
+      text: comparisonMode
+        ? `${candidate} 쪽에서는 ${meaning.keywords[0]} 신호가 핵심 차이로 나타나요.`
+        : isWinner ? `${candidate} 쪽 카드 신호가 후보 중 가장 강해요.` : `${candidate} 쪽에는 상대적으로 약하거나 주의가 필요한 신호가 나와요.`,
       reasoning: {
         sourceMeaning: toKoreanHaeyo(`${card.nameKo} ${orientation === "upright" ? "정방향" : "역방향"}은 ${meaning.summary}`),
-        questionConnection: `${selected.positionTitle} 자리에서는 ${option} 메뉴를 선택하는 행동만 살펴요. ${card.nameKo}의 ${meaning.keywords.slice(0, 2).join("·")} 의미와 ${orientation === "upright" ? "정방향의 지지" : "역방향의 주의"}를 반영하고, ${signalTier}의 신호 강도를 두 메뉴 비교에 사용했어요.`,
-        decisionImpact: isWinner
-          ? `${option} 선택 카드의 점수가 상대 선택지보다 높아서 이번 결론은 ${withParticle(option, "을", "를")} 우선해요.`
-          : `${option} 자체가 나쁘다는 뜻은 아니지만, 이번 두 카드의 비교에서는 ${withParticle(choices[winnerIndex], "을", "를")} 먼저 골라요.`,
+        questionConnection: `${selected.positionTitle} 자리에서는 ${card.nameKo}의 ${meaning.keywords.slice(0, 2).join("·")} 의미를 ${candidate} 선택의 비교 신호로 적용해요. 실제 대상의 객관적 속성을 카드가 증명한다고 보지는 않아요.`,
+        decisionImpact: comparisonMode
+          ? `이 신호는 ${candidate} 쪽의 차이를 설명하지만, 이 후보가 객관적으로 더 낫다는 뜻은 아니에요.`
+          : isWinner
+          ? `이 카드 신호가 다른 후보보다 강해서 ${withParticle(winner, "을", "를")} 이번 질문의 직접 답으로 정해요.`
+          : `이 카드의 주의점은 반영하지만, 더 강한 신호를 받은 ${winner} 쪽이라는 결론을 다시 열지는 않아요.`,
       },
       evidence: [
         `${orientation === "upright" ? "정방향" : "역방향"} · ${meaning.keywords.slice(0, 2).join(" · ")}`,
@@ -453,38 +704,70 @@ function generateBinaryChoiceResult(
       ],
     };
   });
-  const cards = comparedCards.map((selected) => getCard(selected.cardId));
+  const axes = candidates.map((candidate, index) => {
+    const selected = comparedCards[index % comparedCards.length];
+    const card = getCard(selected.cardId);
+    return {
+      label: `${candidate.slice(0, 24)}${language === "ko" ? " 신호" : ""}`.slice(0, 30),
+      score: scores[index],
+      evidence: language === "ko"
+        ? `${card.nameKo} ${selected.reversed ? "역방향" : "정방향"}의 비교 신호를 반영했어요.`
+        : `Reflects ${card.nameEn} in the ${selected.reversed ? "reversed" : "upright"} orientation.`,
+      evidenceCardIds: [card.id],
+    };
+  });
+  if (axes.length < 3) {
+    axes.push({
+      label: language === "ko"
+        ? comparisonMode ? "비교 선명도" : "결론 선명도"
+        : comparisonMode ? "Contrast clarity" : "Decision clarity",
+      score: clampScore(52 + difference * 2),
+      evidence: language === "ko"
+        ? comparisonMode
+          ? `후보별 카드 신호 차이를 ${difference}점으로 표시했어요.`
+          : `${winner} 쪽 신호가 다음 후보보다 ${difference}점 높아요.`
+        : comparisonMode
+          ? `The card-signal contrast is ${difference} points.`
+          : `${winner} leads the next candidate by ${difference} points.`,
+      evidenceCardIds: comparedCards.slice(0, 2).map((card) => card.cardId),
+    });
+  }
+  const synthesis = cardInterpretations.map((interpretation, index) => {
+    const card = getCard(interpretation.cardId);
+    const candidate = candidates[index % candidates.length];
+    if (language === "ko") {
+      return comparisonMode
+        ? `${card.nameKo} 카드는 ${candidate} 쪽에서 ${card[comparedCards[index]?.reversed ? "reversed" : "upright"].keywords[0]} 신호가 두드러진다는 비교 근거가 돼요.`
+        : `${card.nameKo} 카드는 ${candidate} 선택에 ${index === winnerIndex ? "가장 큰 지지" : selectedCards[index]?.reversed ? "주의" : "비교 신호"}를 더하는 근거가 돼요.`;
+    }
+    return comparisonMode
+      ? `${card.nameEn} identifies the main tarot signal for ${candidate}.`
+      : `${card.nameEn} provides ${index === winnerIndex ? "the strongest support" : "a comparative signal"} for ${candidate}.`;
+  }).join(" ");
 
   return {
-    summary: `이번 카드 배열에서는 ${withParticle(winner, "을", "를")} 골라요. 두 카드의 방향과 핵심 의미를 비교하면 ${winner} 쪽 신호가 더 강해요.`,
+    verdict: { kind: contract.kind, value: comparisonMode ? verdictValue : winner, statement },
+    summary: language === "ko"
+      ? comparisonMode
+        ? `${statement} 각 차이는 후보의 실제 속성이 아니라 카드 원뜻을 후보별 자리에 적용한 결과예요.`
+        : `${statement} 후보별 카드의 방향과 의미를 비교하면 ${winner} 쪽 신호가 가장 강해요.`
+      : comparisonMode
+        ? `${statement} These are tarot signals assigned to each candidate, not objective properties.`
+        : `${statement} Comparing the orientation and meaning of each candidate card gives ${winner} the strongest signal.`,
     cardInterpretations,
-    synthesis: `${cards[0].nameKo} 카드는 ${choices[0]} 선택에 ${comparedCards[0].reversed ? "주의" : winnerIndex === 0 ? "더 큰 지지" : "지지"}를 더해요. ${cards[1].nameKo} 카드는 ${choices[1]} 선택에 ${comparedCards[1].reversed ? "주의" : winnerIndex === 1 ? "더 큰 지지" : "지지"}를 더해요.`,
-    guidance: [
-      `이번에는 ${withParticle(winner, "을", "를")} 우선 골라요.`,
-      "실제 주문 가능 여부나 피해야 할 재료가 있다면 그 정보는 카드 결론보다 먼저 확인해요.",
-    ],
-    axes: [
-      {
-        label: `${choices[0]} 선택`,
-        score: scores[0],
-        evidence: `${cards[0].nameKo} ${comparedCards[0].reversed ? "역방향" : "정방향"}의 선택 신호를 반영했어요.`,
-        evidenceCardIds: [cards[0].id],
-      },
-      {
-        label: `${choices[1]} 선택`,
-        score: scores[1],
-        evidence: `${cards[1].nameKo} ${comparedCards[1].reversed ? "역방향" : "정방향"}의 선택 신호를 반영했어요.`,
-        evidenceCardIds: [cards[1].id],
-      },
-      {
-        label: "결론 선명도",
-        score: clampScore(52 + difference * 2),
-        evidence: `${winner} 선택 점수가 다른 메뉴보다 ${difference}점 높아요.`,
-        evidenceCardIds: [cards[winnerIndex].id, cards[loserIndex].id],
-      },
-    ],
+    synthesis,
+    guidance: language === "ko"
+      ? comparisonMode
+        ? [`${candidates[0]} 쪽의 카드 신호와 ${candidates[1]} 쪽의 카드 신호를 질문의 실제 조건과 따로 구분해 봐요.`, "선택까지 원하면 어떤 후보를 고를지 추가 질문으로 물어볼 수 있어요."]
+        : [`이번에는 ${withParticle(`“${winner}”`, "으로", "로")} 결정해요.`, "실행할 수 없는 현실적인 사정이 있을 때만 결론을 바꿔요."]
+      : comparisonMode
+        ? ["Keep each card signal separate from verifiable real-world facts.", "Ask a follow-up if you want the reading to choose one candidate."]
+        : [`Act on “${winner}.”`, "Override it only if a real-world constraint makes it unavailable."],
+    axes,
     signals: { support, caution, uncertainty },
-    limitation: "이 결론은 두 카드의 배열로 메뉴 하나를 고른 타로 해석이에요. 맛·영양·건강에 관한 사실 판단은 아니에요.",
+    limitation: language === "ko"
+      ? "이 결론은 후보별 카드 신호를 비교한 타로 해석이며, 대상의 객관적 속성이나 실제 결과를 증명하지 않아요."
+      : "These scores are not real-world probabilities. The conclusion compares tarot signals and does not prove objective properties or outcomes.",
   };
 }
 
@@ -532,15 +815,19 @@ export function generateReadingResult(
   selectedCards: SelectedCard[],
   previous?: ReadingResult,
   language: ReadingLanguage = "ko",
+  answerContract?: AnswerContract,
 ): ReadingResult {
   const category = detectQuestionCategory(question);
   const latestRound = Math.max(...selectedCards.map((card) => card.round));
   const latestCards = previous
     ? selectedCards.filter((card) => card.round === latestRound)
     : selectedCards;
-  const choices = extractBinaryChoices(question);
-  if (language === "ko" && choices && latestCards.length >= 2) {
-    return generateBinaryChoiceResult(question, choices, latestCards);
+  const contract = answerContract ?? createAnswerContract(question, undefined, language);
+  if (
+    ["choose_one", "recommend_one", "yes_no", "compare"].includes(contract.kind)
+    && contract.candidates.length >= 2
+  ) {
+    return generateCandidateResult(question, contract, latestCards, language);
   }
   const cardInterpretations = latestCards.map((selected) => {
     const card = getCard(selected.cardId);
@@ -633,6 +920,11 @@ export function generateReadingResult(
     ].slice(0, Math.max(2, Math.min(4, latestCards.length + 1)));
 
   const result: ReadingResult = {
+    verdict: {
+      kind: contract.kind,
+      value: summary.split(/[.!?\n]/u)[0] ?? summary,
+      statement: summary.split(/[.!?\n]/u)[0] ?? summary,
+    },
     summary,
     cardInterpretations,
     synthesis,
