@@ -4,7 +4,7 @@
 
 ## 공개 사이트
 
-- 앱: [https://tarot-milktea.yiyaaang.workers.dev](https://tarot-milktea.yiyaaang.workers.dev)
+- 앱: [https://tarot-milktea.cha-amu.workers.dev](https://tarot-milktea.cha-amu.workers.dev)
 - 공개 소스: [https://github.com/chococobyeol/tarot-milktea-web](https://github.com/chococobyeol/tarot-milktea-web)
 
 정적 화면과 같은 출처의 API를 하나의 Cloudflare Worker로 배포했습니다. 질문 구성과 카드 해석은 Workers AI, 익명 세션의 사용량 카운터는 D1을 사용합니다.

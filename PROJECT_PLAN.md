@@ -10,7 +10,7 @@
 
 개인적으로 사용할 수 있는 웹 기반 타로 카드 앱을 만든다. 사용자가 질문하고 카드를 뽑으면 AI가 질문과 카드 조합을 바탕으로 한국어 해석을 생성한다.
 
-사용자에게 표시할 앱 이름은 `타로밀크티 웹`으로 확정한다. Cloudflare 배포 이름은 `tarot-milktea`이며, 무료 운영 주소는 `https://tarot-milktea.yiyaaang.workers.dev`이다.
+사용자에게 표시할 앱 이름은 `타로밀크티 웹`으로 확정한다. Cloudflare 배포 이름은 `tarot-milktea`이며, 무료 운영 주소는 `https://tarot-milktea.cha-amu.workers.dev`이다.
 
 초기 버전은 취미·개인 프로젝트로 운영하며 다음 원칙을 따른다.
 
@@ -28,7 +28,7 @@
 - 서비스: Cloudflare
 - 프런트엔드: Cloudflare Worker의 정적 자산과 같은 배포 단위의 API Route
 - 배포 프로젝트명: `tarot-milktea`
-- 무료 주소: `https://tarot-milktea.yiyaaang.workers.dev`
+- 무료 주소: `https://tarot-milktea.cha-amu.workers.dev`
 - 개인 도메인: 초기 범위에서 제외
 
 ### 2.2 AI 실행 방식
