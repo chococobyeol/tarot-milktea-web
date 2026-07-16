@@ -1,10 +1,13 @@
 import {
   designReading,
   detectQuestionCategory,
+  extractBinaryChoices,
   generateReadingResult,
   getCard,
   orientationLabel,
+  toKoreanHaeyo,
   CARD_BY_ID,
+  type BinaryChoices,
   type ReadingPlan,
   type ReadingLanguage,
   type ReadingResult,
@@ -42,7 +45,8 @@ const SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
 - 카드, 방향, 자리 역할과 질문의 관계를 근거로 설명한다.
 - 질문의 크기에 맞춰 해석 범위를 제한한다. 식사나 오늘의 선택 같은 일상 질문을 인생, 재정, 조직, 타인 관계 문제로 확대하지 않는다.
 - 한국어로 쓸 때는 주어와 행동이 드러나는 짧고 자연스러운 문장을 사용한다. 카드 키워드와 자리 이름을 추상명사로 나열하지 않는다.
-- 한국어 출력은 "-한다/-이다" 문체로 통일한다. "-합니다/-하십시오/-하세요" 높임말을 섞지 않는다.
+- 한국어 출력은 자연스러운 "-해요/-이에요" 해요체로 통일한다. "-한다/-이다"나 "-합니다/-입니다" 문체를 섞지 않는다.
+- 질문에 두 선택지가 분명하면 현실의 사실을 예측한 척하지 않으면서도, 타로 해석의 추천은 첫 문장에서 반드시 하나로 정해 말한다.
 - "서로 다른 측면", "요소가 상호작용한다", "균형 잡힌 고려", "분리를 통해 접근" 같은 내용 없는 문장을 쓰지 않는다.
 - 요약, 종합 해석, 확인할 점에서 같은 내용을 반복하지 않는다.
 - 카드별 sourceMeaning에서는 제공된 원뜻을 정확히 설명하고, 그 밖의 영역에서는 카드 데이터 문장을 그대로 복사하지 말고 질문에 맞는 실제 판단 기준이나 행동으로 바꿔 쓴다.
@@ -193,6 +197,34 @@ function normalizeReadingShape(
   };
 }
 
+function stabilizeBinaryChoiceReading(
+  result: ReadingResult,
+  choices: BinaryChoices | null,
+  language: ReadingLanguage,
+): ReadingResult {
+  if (!choices) return result;
+  const firstSentence = result.summary.split(/[.!?\n]/u)[0]?.toLowerCase() ?? "";
+  const rankedChoices = choices
+    .map((choice) => ({ choice, offset: firstSentence.lastIndexOf(choice.toLowerCase()) }))
+    .filter(({ offset }) => offset >= 0)
+    .sort((left, right) => right.offset - left.offset);
+  const winner = rankedChoices[0]?.choice;
+  if (!winner) return result;
+
+  return {
+    ...result,
+    guidance: language === "ko"
+      ? [
+        `이번에는 ${winner} 메뉴를 골라요.`,
+        "실제로 주문하거나 준비할 수 없는 사정이 있는지만 확인해요.",
+      ]
+      : [
+        `Choose ${winner} for this reading.`,
+        "Only override this recommendation if a practical constraint makes it unavailable.",
+      ],
+  };
+}
+
 function classifyAiFailure(error: unknown): string {
   if (error instanceof SyntaxError) return "INVALID_JSON";
   if (error && typeof error === "object" && "issues" in error) return "SCHEMA_VALIDATION_FAILED";
@@ -249,11 +281,18 @@ async function runAiJson<T>(
 
 async function createAiPlan(ai: WorkersAIBinding, question: string, followup: boolean, language: ReadingLanguage): Promise<ReadingPlan> {
   const localPlan = designReading(question, followup, language);
+  const binaryChoices = extractBinaryChoices(question);
+  const binaryChoiceGuide = binaryChoices
+    ? (language === "ko"
+      ? `이 질문의 선택지는 "${binaryChoices[0]}"와 "${binaryChoices[1]}"이다. 카드는 정확히 2장으로 정하고, 첫 자리는 "${binaryChoices[0]} 메뉴 선택", 둘째 자리는 "${binaryChoices[1]} 메뉴 선택"을 직접 다룬다. 맛·영양·포만감·소화·재료·조리 방식처럼 질문에 없는 음식 속성을 자리 기준으로 만들지 말고, 각 메뉴 선택에 카드가 주는 지지와 주의 신호만 살핀다.`
+      : `The two options are "${binaryChoices[0]}" and "${binaryChoices[1]}". Use exactly two cards, one for each option, and do not invent physical attributes of either option.`)
+    : "";
   const prompt = `다음 질문을 위한 ${followup ? "추가" : "최초"} 타로 리딩 구조를 설계하라.
 질문: ${JSON.stringify(question)}
 출력 언어: ${language === "ko" ? "한국어" : "English"}. JSON 키는 스키마 그대로 유지하고 모든 사용자 표시 문자열 값은 이 언어로 작성한다.
 질문 범위 지침: ${questionScopeGuide(question, language)}
 문장 구체성 지침: ${concreteWritingGuide(question, language)}
+두 선택지 비교 지침: ${binaryChoiceGuide || "해당 없음"}
 카드 수는 질문의 범위에 따라 1~5장이다. 기본 권장 수는 ${localPlan.cardCount}장이지만 질문을 읽고 조정할 수 있다.
 자리 역할은 질문에 실제로 답하는 구체적인 비교 기준으로 작성한다. "방향성", "외부 조건", "실행 가능성", "현재 상황"처럼 어느 질문에나 붙일 수 있는 제목은 피한다.
 짧은 일상 질문에서는 배고픔, 일정, 준비 부담처럼 바로 확인 가능한 말로 쓴다.
@@ -281,6 +320,7 @@ async function createAiInterpretation(
 ): Promise<ReadingResult> {
   const everydayDomain = detectEverydayDomain(question);
   const category = detectQuestionCategory(question);
+  const binaryChoices = extractBinaryChoices(question);
   const latestRound = Math.max(...cards.map((card) => card.round));
   const cardsToInterpret = previous ? cards.filter((card) => card.round === latestRound) : cards;
   const expectedCards: ExpectedInterpretation[] = cardsToInterpret.map((selected) => {
@@ -295,7 +335,7 @@ async function createAiInterpretation(
       orientation: selected.reversed ? "reversed" : "upright",
       orientationLabel: direction,
       sourceMeaning: language === "ko"
-        ? `${card.nameKo} ${direction}의 핵심은 ${meaning.keywords.slice(0, 3).join("·")}이다. ${meaning.summary}`
+        ? toKoreanHaeyo(`${card.nameKo} ${direction}의 핵심은 ${meaning.keywords.slice(0, 3).join("·")}이다. ${meaning.summary}`)
         : "",
       sourceKeywords: meaning.keywords,
       evidence: language === "ko"
@@ -366,18 +406,24 @@ async function createAiInterpretation(
     priorAxes: previous.axes.map(({ label, score }) => ({ label, score })),
     priorSignals: previous.signals,
   } : null;
+  const directChoiceGuide = binaryChoices
+    ? (language === "ko"
+      ? `이 질문은 "${binaryChoices[0]}"와 "${binaryChoices[1]}" 중 하나를 고르는 질문이다. summary 첫 문장은 반드시 "이번 카드 배열에서는 ${binaryChoices[0]} 쪽을 골라요." 또는 "이번 카드 배열에서는 ${binaryChoices[1]} 쪽을 골라요." 형식으로 하나만 선택한다. "둘 다", "상황에 따라", "조건을 더 확인한다", "판단하기 어렵다"로 결론을 미루지 않는다. guidance에서도 반대 선택지를 고르는 경우를 따로 제안하거나 "두 메뉴 중 조건에 맞는 것을 고른다"며 결론을 다시 열지 않는다. 이미 고른 메뉴를 실행할 때 확인할 내용만 쓴다. 맛·영양 같은 현실 속성을 단정하지 않는 한계는 직접 결론을 말한 다음 문장에 설명한다.`
+      : `This is a choice between "${binaryChoices[0]}" and "${binaryChoices[1]}". The first summary sentence must recommend exactly one option. State limitations only after the verdict.`)
+    : "구체적인 두 선택지가 없으므로 적용하지 않는다.";
   const prompt = `다음 질문과 카드로 종합 해석을 생성하라.
 질문: ${JSON.stringify(question)}
 출력 언어: ${language === "ko" ? "한국어" : "English"}. JSON 키는 스키마 그대로 유지하고 모든 사용자 표시 문자열 값은 이 언어로 작성한다.
 질문 범위 지침: ${questionScopeGuide(question, language)}
 문장 구체성 지침: ${concreteWritingGuide(question, language)}
+직접 선택 지침: ${directChoiceGuide}
 선택 카드와 참고 데이터: ${JSON.stringify(selectedData)}
 이전 결과의 연결 정보(문체를 모방하지 말 것): ${JSON.stringify(previousContext)}
 
 선택 카드의 selected.applicationBoundary가 있으면 해당 경계를 카드별 해석, 종합, 확인 항목, 그래프 축 전체에 반드시 적용한다.
 
 필수 JSON 필드:
-- summary: 질문에 대한 직접적인 결론과 우선할 선택 기준을 2~3문장으로 쓴다. 카드 이름이나 키워드를 나열하지 않는다.
+- summary: 질문에 대한 직접적인 결론과 우선할 선택 기준을 2~3문장으로 쓴다. 두 선택지가 있으면 첫 문장에서 반드시 하나를 고른다. 카드 이름이나 키워드를 나열하지 않는다.
 - cardInterpretations: 정확히 ${expectedCards.length}개이며 중복을 만들지 않는다. 다음 순서와 cardId, positionTitle, orientation 값을 그대로 사용한다: ${JSON.stringify(expectedCards.map(({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, sourceMeaning, evidence }) => ({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, sourceMeaning, evidence })))}.
   - text: 먼저 읽히는 결론이다. 질문에 적용할 판단을 25~90자로 직접 쓴다.
   - reasoning.sourceMeaning: 한국어에서는 위 카드 목록에 제공된 sourceMeaning 문자열을 그대로 쓴다. 서버에서도 이 값을 카드 데이터로 고정한다. 영어에서는 coreMeaning과 sourceKeywords를 정확히 번역해 45~140자로 설명한다. 아직 질문 분야의 메뉴·옷·일정에 적용하지 않는다.
@@ -413,11 +459,28 @@ guidance와 axes도 같은 규칙을 따른다. 카드 상징에서 과식·영�
 ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 빠뜨리지 않는다.`;
   return runAiJson(ai, prompt, (value) => {
     const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards, everydayDomain, language));
+    const polished = polishReadingLanguage(parsed, question, language);
     return enforceReadingQuality(
-      polishReadingLanguage(parsed, question, language),
+      stabilizeBinaryChoiceReading(polished, binaryChoices, language),
       { question, language, sourceSentences, expectedCards },
     );
-  }, everydayDomain ? 3600 : 4000, 3);
+  }, everydayDomain ? 3600 : 4000, binaryChoices ? 1 : 2);
+}
+
+async function resolveAiOrLocal<T>(
+  ai: WorkersAIBinding | undefined,
+  label: "plan" | "interpretation",
+  aiTask: (binding: WorkersAIBinding) => Promise<T>,
+  localTask: () => T,
+): Promise<{ data: T; mode: "ai" | "local" }> {
+  if (!ai) return { data: localTask(), mode: "local" };
+  try {
+    return { data: await aiTask(ai), mode: "ai" };
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status < 500) throw error;
+    console.warn("[tarot-ai] using validated local fallback", { label, code: error.code });
+    return { data: localTask(), mode: "local" };
+  }
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -433,16 +496,22 @@ export async function POST(request: Request): Promise<Response> {
     await consumeAiCall(request, runtimeEnv, countAsFollowup);
 
     if (input.action === "plan") {
-      const data = runtimeEnv.AI
-        ? await createAiPlan(runtimeEnv.AI, input.question, input.followup, input.language)
-        : designReading(input.question, input.followup, input.language);
-      return Response.json({ data, mode: runtimeEnv.AI ? "ai" : "local" }, { headers: { "cache-control": "no-store" } });
+      const response = await resolveAiOrLocal(
+        runtimeEnv.AI,
+        "plan",
+        (ai) => createAiPlan(ai, input.question, input.followup, input.language),
+        () => readingPlanSchema.parse(designReading(input.question, input.followup, input.language)),
+      );
+      return Response.json(response, { headers: { "cache-control": "no-store" } });
     }
 
-    const data = runtimeEnv.AI
-      ? await createAiInterpretation(runtimeEnv.AI, input.question, input.cards, input.previous, input.language)
-      : generateReadingResult(input.question, input.cards, input.previous, input.language);
-    return Response.json({ data, mode: runtimeEnv.AI ? "ai" : "local" }, { headers: { "cache-control": "no-store" } });
+    const response = await resolveAiOrLocal(
+      runtimeEnv.AI,
+      "interpretation",
+      (ai) => createAiInterpretation(ai, input.question, input.cards, input.previous, input.language),
+      () => readingResultSchema.parse(generateReadingResult(input.question, input.cards, input.previous, input.language)),
+    );
+    return Response.json(response, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return apiErrorResponse(error);
   }

@@ -1,8 +1,11 @@
-import type {
-  Orientation,
-  ReadingLanguage,
-  ReadingPlan,
-  ReadingResult,
+import {
+  extractBinaryChoices,
+  toKoreanHaeyo,
+  type BinaryChoices,
+  type Orientation,
+  type ReadingLanguage,
+  type ReadingPlan,
+  type ReadingResult,
 } from "@/src/lib/tarot";
 
 type EverydayDomain = "food" | "outfit" | "schedule";
@@ -69,6 +72,18 @@ function normalize(value: string): string {
   return value.toLowerCase().replace(/[^0-9a-z가-힣]/g, "");
 }
 
+function findDirectChoiceVerdict(summary: string, choices: BinaryChoices): string | null {
+  const firstSentence = normalize(summary.split(/[.!?\n]/u)[0] ?? "");
+  const selected = choices.filter((choice) => {
+    const choiceLabel = normalize(choice);
+    const choiceOffset = firstSentence.indexOf(choiceLabel);
+    if (choiceOffset < 0) return false;
+    const tail = firstSentence.slice(choiceOffset + choiceLabel.length, choiceOffset + choiceLabel.length + 24);
+    return /^(?:(?:을|를|쪽을)(?:바로|먼저|우선)?|(?:이|가))?(?:골라요|선택해요|추천해요|우선해요|먹어요|더나아요)/u.test(tail);
+  });
+  return selected.length === 1 ? selected[0] : null;
+}
+
 export function groundPositionConnection(value: string, positionTitle: string): string {
   if (normalize(value).includes(normalize(positionTitle))) return value;
   const positionLabel = positionTitle.trim().endsWith("자리")
@@ -93,7 +108,7 @@ function appliedProseSections(result: ReadingResult): string[] {
   ].filter(Boolean);
 }
 
-const KOREAN_POLITE_ENDING = /합니다|하십시오|하세요|됩니다|있습니다|없습니다|입니다/;
+const KOREAN_FORMAL_ENDING = /합니다|하십시오|됩니다|있습니다|없습니다|입니다/;
 const INTERNAL_SCHEMA_TERM = /position[_ ]?focus|position[_ ]?title|source[_ ]?meaning|question[_ ]?connection|decision[_ ]?impact|card[_ ]?interpretations|evidence[_ ]?card[_ ]?ids/i;
 
 const UNSUPPORTED_FOOD_CAUSALITY: RegExp[] = [
@@ -187,6 +202,23 @@ export function enforcePlanQuality(
   }
 
   const domain = detectEverydayDomain(context.question);
+  const choices = extractBinaryChoices(context.question);
+  if (choices) {
+    if (plan.cardCount !== 2 || plan.positions.length !== 2) {
+      throw new Error("두 선택지를 비교하는 질문은 선택지마다 한 장씩 정확히 2장으로 구성해야 한다.");
+    }
+    choices.forEach((choice, index) => {
+      if (!normalize(`${plan.positions[index]?.title ?? ""} ${plan.positions[index]?.focus ?? ""}`).includes(normalize(choice))) {
+        throw new Error(`카드 ${index + 1}의 자리에 선택지 "${choice}"를 직접 써야 한다.`);
+      }
+    });
+    const planText = plan.positions.map((position) => `${position.title} ${position.focus}`).join(" ");
+    const inventedPhysicalTerm = ["맛", "맵", "포만", "영양", "소화", "칼로리", "재료", "조리", "가격", "비용", "시간"]
+      .find((term) => planText.includes(term) && !context.question.includes(term));
+    if (inventedPhysicalTerm) {
+      throw new Error("두 메뉴 비교 자리에서 질문에 없는 음식의 맛·영양·조리 특성을 예측 기준으로 만들지 말아야 한다.");
+    }
+  }
   if (domain) {
     const anchor = KOREAN_DOMAIN_ANCHORS[domain];
     if (!anchor.test(plan.interpretationFrame)) {
@@ -256,12 +288,28 @@ export function polishReadingLanguage(
       base = base.replaceAll("방향성", concreteDirectionTerm);
     }
     base = base.replace(/우선 기준(?:을|를)\s*기준으로/g, "우선 기준으로");
-    if (!food) return base;
-    return base
-    .replaceAll("오전 동안 지속 가능한 포만감", "오전까지 오래가는 포만감")
-    .replaceAll("지속 가능한 포만감", "오래가는 포만감")
-    .replaceAll("오전 동안 지속 가능한 에너지", "오전 일정에 필요한 에너지")
-    .replaceAll("지속 가능한 에너지", "오래 유지되는 에너지");
+    if (!food) return toKoreanHaeyo(base);
+    return toKoreanHaeyo(base
+      .replaceAll("종합적으로", "전체 카드에서")
+      .replaceAll("장기적으로", "오늘 식사에서는")
+      .replaceAll("장기적인", "오늘 식사에 적용할")
+      .replaceAll("장기적", "오늘 식사의")
+      .replaceAll("지속 가능성", "반복 선택 가능성")
+      .replaceAll("외부 조건", "실제 조건")
+      .replaceAll("실행 가능성", "선택 가능성")
+      .replaceAll("안정성", "선택 확실성")
+      .replaceAll("자원", "준비 여건")
+      .replaceAll("성과", "선택 결과")
+      .replaceAll("책임", "확인 사항")
+      .replaceAll("요소", "잣대")
+      .replaceAll("오전 동안 지속 가능한 포만감", "오전까지 오래가는 포만감")
+      .replaceAll("지속 가능한 포만감", "오래가는 포만감")
+      .replaceAll("오전 동안 지속 가능한 에너지", "오전 일정에 필요한 에너지")
+      .replaceAll("지속 가능한 에너지", "오래 유지되는 에너지"));
+  };
+  const polishSourceMeaning = (value: string): string => {
+    const plain = value.replace(/\*\*|__|`/g, "");
+    return language === "ko" ? toKoreanHaeyo(plain) : plain;
   };
 
   return {
@@ -273,9 +321,7 @@ export function polishReadingLanguage(
       ...item,
       text: polish(item.text),
       reasoning: item.reasoning ? {
-        sourceMeaning: language === "ko"
-          ? item.reasoning.sourceMeaning
-          : polish(item.reasoning.sourceMeaning),
+        sourceMeaning: polishSourceMeaning(item.reasoning.sourceMeaning),
         questionConnection: polish(item.reasoning.questionConnection),
         decisionImpact: polish(item.reasoning.decisionImpact),
       } : undefined,
@@ -351,8 +397,8 @@ export function enforceReadingQuality(
   if (vagueMatch) {
     issues.push(`추상 표현 "${vagueMatch}"을 삭제하고 질문에 맞는 실제 기준으로 바꿔야 한다.`);
   }
-  if (KOREAN_POLITE_ENDING.test(visibleText)) {
-    issues.push("한국어 해석은 높임말을 섞지 말고 '-한다/-이다' 문체로 통일해야 한다.");
+  if (KOREAN_FORMAL_ENDING.test(visibleText)) {
+    issues.push("한국어 해석은 딱딱한 '-합니다'체를 섞지 말고 자연스러운 해요체로 통일해야 한다.");
   }
   const leakedSchemaTerm = visibleText.match(INTERNAL_SCHEMA_TERM)?.[0];
   if (leakedSchemaTerm) {
@@ -367,6 +413,28 @@ export function enforceReadingQuality(
   }
 
   const domain = detectEverydayDomain(context.question);
+  const binaryChoices = extractBinaryChoices(context.question);
+  if (binaryChoices) {
+    const verdict = findDirectChoiceVerdict(result.summary, binaryChoices);
+    if (!verdict) {
+      issues.push(`summary 첫 문장에서 "${binaryChoices[0]}"와 "${binaryChoices[1]}" 중 하나만 직접 골라야 한다.`);
+    } else {
+      const losingChoice = binaryChoices.find((choice) => choice !== verdict) ?? "";
+      const guidance = normalize(result.guidance.join(" "));
+      const losingLabel = normalize(losingChoice);
+      if (!guidance.includes(normalize(verdict))) {
+        issues.push(`guidance에서도 이미 고른 "${verdict}"를 실행하는 방법을 직접 써야 한다.`);
+      }
+      if (
+        guidance.includes("두메뉴중")
+        || guidance.includes(`${losingLabel}를고른다면`)
+        || guidance.includes(`${losingLabel}을고른다면`)
+        || guidance.includes(`${losingLabel}쪽을고른다면`)
+      ) {
+        issues.push("guidance에서 결론을 다시 양쪽 선택이나 조건부 선택으로 되돌리지 말아야 한다.");
+      }
+    }
+  }
   if (domain) {
     const forbiddenWords = [...new Set(visibleText.match(EVERYDAY_FORBIDDEN_WORDS) ?? [])];
     if (forbiddenWords.length > 0) {

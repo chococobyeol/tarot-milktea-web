@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { readingResultSchema, tarotApiRequestSchema } from "@/src/lib/schemas";
 import {
   createSessionDeck,
+  detectQuestionCategory,
   designReading,
+  extractBinaryChoices,
   generateReadingResult,
   TAROT_CARDS,
   type SelectedCard,
@@ -36,10 +38,65 @@ describe("tarot deck data", () => {
 });
 
 describe("reading design and interpretation", () => {
+  it("recognizes a repeated Korean food choice and assigns one card to each menu", () => {
+    const question = "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘";
+    const choices = extractBinaryChoices(question);
+    const plan = designReading(question);
+
+    expect(choices).toEqual(["김치찌개", "애호박찌개"]);
+    expect(detectQuestionCategory(question)).toBe("decision");
+    expect(plan.cardCount).toBe(2);
+    expect(plan.positions.map((position) => position.title)).toEqual([
+      "김치찌개 메뉴 선택",
+      "애호박찌개 메뉴 선택",
+    ]);
+    expect(plan.positions.every((position) => !/맛|영양|포만감|소화|재료|조리/.test(position.focus))).toBe(true);
+  });
+
+  it("gives one deterministic verdict for an explicit two-menu question", () => {
+    const question = "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘";
+    const plan = designReading(question);
+    const selected: SelectedCard[] = [
+      {
+        cardId: "major-07",
+        reversed: false,
+        positionId: plan.positions[0].id,
+        positionTitle: plan.positions[0].title,
+        positionFocus: plan.positions[0].focus,
+        round: 0,
+      },
+      {
+        cardId: "cups-knight",
+        reversed: true,
+        positionId: plan.positions[1].id,
+        positionTitle: plan.positions[1].title,
+        positionFocus: plan.positions[1].focus,
+        round: 0,
+      },
+    ];
+
+    const first = generateReadingResult(question, selected);
+    const second = generateReadingResult(question, selected);
+    const selectedMenus = ["김치찌개", "애호박찌개"].filter((menu) => (
+      new RegExp(`${menu}(?:을|를) 골라요`).test(first.summary.split(".")[0])
+    ));
+
+    expect(readingResultSchema.parse(first)).toEqual(first);
+    expect(first).toEqual(second);
+    expect(selectedMenus).toHaveLength(1);
+    expect(first.summary).not.toMatch(/상황에 따라|조건 확인이 우선|판단하기 어렵/);
+    expect(first.axes.map((axis) => axis.label)).toEqual([
+      "김치찌개 선택",
+      "애호박찌개 선택",
+      "결론 선명도",
+    ]);
+    expect(first.cardInterpretations.every((item) => item.text.endsWith("요."))).toBe(true);
+  });
+
   it.each([
     ["오늘 한 가지 핵심만 확인하고 싶다", 1],
     ["이 관계에서 반복되는 문제와 조정할 부분은?", 2],
-    ["A안과 B안 중 무엇을 기준으로 비교해야 하나?", 4],
+    ["A안과 B안 중 무엇을 기준으로 비교해야 하나?", 2],
   ])("assigns a valid card structure for %s", (question, expected) => {
     const plan = designReading(question);
     expect(plan.cardCount).toBe(expected);

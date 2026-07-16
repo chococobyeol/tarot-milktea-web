@@ -51,6 +51,7 @@ import {
 import {
   createRecordId,
   createSessionDeck,
+  generateReadingResult,
   getCard,
   MILK_TEA_IMAGE,
   orientationLabel,
@@ -176,6 +177,16 @@ function userError(error: unknown, language: AppLanguage = "ko"): string {
   }
   if (error instanceof Error) return error.message;
   return english ? "The request could not be processed. Try again." : "요청을 처리하지 못했습니다. 다시 시도하세요.";
+}
+
+function canUseLocalInterpretation(error: unknown): boolean {
+  if (error instanceof TarotApiError) {
+    return error.status >= 500
+      || error.status === 0
+      || error.code === "REQUEST_TIMEOUT"
+      || error.code === "NETWORK_ERROR";
+  }
+  return error instanceof Error && error.name === "ZodError";
 }
 
 async function writeClipboard(text: string): Promise<void> {
@@ -744,6 +755,20 @@ export function TarotApp() {
       setPhase("revealing");
     } catch (requestError) {
       await minimumInterpretationTime;
+      if (canUseLocalInterpretation(requestError)) {
+        const fallback = generateReadingResult(
+          promptQuestion,
+          allCards,
+          round > 0 ? result ?? undefined : undefined,
+          language,
+        );
+        setApiMode("local");
+        setLatestCards(newCards);
+        setPendingResult(fallback);
+        setRevealCount(0);
+        setPhase("revealing");
+        return;
+      }
       if (requestError instanceof TarotApiError && requestError.status === 401) {
         setSessionRefreshNeeded(true);
       }

@@ -104,6 +104,7 @@ export interface FollowupRecord {
 
 export type QuestionCategory = "relationship" | "work" | "decision" | "self";
 export type ReadingLanguage = "ko" | "en";
+export type BinaryChoices = [string, string];
 
 const fileByTitle = new Map(
   imageManifest.assets
@@ -155,8 +156,96 @@ export function createSessionDeck(): DeckCard[] {
   return deck.map((item, order) => ({ ...item, order }));
 }
 
+function cleanChoiceLabel(value: string): string {
+  return value
+    .trim()
+    .replace(/^["'“”‘’([{]+|["'“”‘’\])}]+$/g, "")
+    .replace(/^(?:오늘|지금|이번(?:에는|엔)?|나는|내가|제가)\s+/u, "")
+    .replace(/(?:을|를|은|는)$/u, "")
+    .trim();
+}
+
+function koreanCopula(value: string): string {
+  const last = value.at(-1);
+  if (!last) return `${value}예요`;
+  const code = last.charCodeAt(0) - 0xac00;
+  const hasFinal = code >= 0 && code <= 11171 && code % 28 !== 0;
+  return `${value}${hasFinal ? "이에요" : "예요"}`;
+}
+
+export function extractBinaryChoices(question: string): BinaryChoices | null {
+  const scope = question
+    .split(/\n(?:추가 질문\s*\d+|follow-up question\s*\d+)\s*:\s*/iu)
+    .at(-1)
+    ?.trim() ?? question.trim();
+  const repeatedPredicate = scope.match(
+    /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,35}?)(?:을|를)?\s+(먹을지|고를지|선택할지|할지)\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,35}?)(?:을|를)?\s+\2/u,
+  );
+  const amongChoices = scope.match(
+    /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)(?:와|과)\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)\s+중/u,
+  );
+  const versusChoices = scope.match(
+    /([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)\s+(?:vs\.?|대)\s+([가-힣A-Za-z0-9][가-힣A-Za-z0-9\s·&+_-]{0,29}?)(?:[?.!]|$)/iu,
+  );
+  const englishChoices = scope.match(
+    /\b(?:choose|pick|have|eat)\s+([^?.,]{1,30}?)\s+or\s+([^?.,]{1,30}?)(?:[?.!]|$)/iu,
+  );
+  const matched = repeatedPredicate
+    ? [repeatedPredicate[1], repeatedPredicate[3]]
+    : amongChoices
+      ? [amongChoices[1], amongChoices[2]]
+      : versusChoices
+        ? [versusChoices[1], versusChoices[2]]
+        : englishChoices
+          ? [englishChoices[1], englishChoices[2]]
+          : null;
+  if (!matched) return null;
+
+  const choices = matched.map(cleanChoiceLabel) as BinaryChoices;
+  if (choices.some((choice) => choice.length < 1 || choice.length > 24) || choices[0] === choices[1]) return null;
+  return choices;
+}
+
+export function toKoreanHaeyo(value: string): string {
+  const sentenceEnd = "(?=[.!?]|$)";
+  return value
+    .replace(new RegExp(`않았다${sentenceEnd}`, "g"), "않았어요")
+    .replace(new RegExp(`필요해진다${sentenceEnd}`, "g"), "필요해져요")
+    .replace(new RegExp(`줄어든다${sentenceEnd}`, "g"), "줄어들어요")
+    .replace(new RegExp(`생긴다${sentenceEnd}`, "g"), "생겨요")
+    .replace(new RegExp(`만든다${sentenceEnd}`, "g"), "만들어요")
+    .replace(new RegExp(`일관된다${sentenceEnd}`, "g"), "일관돼요")
+    .replace(new RegExp(`산정했다${sentenceEnd}`, "g"), "산정했어요")
+    .replace(new RegExp(`어렵다${sentenceEnd}`, "g"), "어려워요")
+    .replace(new RegExp(`낫다${sentenceEnd}`, "g"), "나아요")
+    .replace(new RegExp(`크다${sentenceEnd}`, "g"), "커요")
+    .replace(new RegExp(`(?:합니다|한다)${sentenceEnd}`, "g"), "해요")
+    .replace(new RegExp(`(?:됩니다|된다)${sentenceEnd}`, "g"), "돼요")
+    .replace(new RegExp(`(?:있습니다|있다)${sentenceEnd}`, "g"), "있어요")
+    .replace(new RegExp(`(?:없습니다|없다)${sentenceEnd}`, "g"), "없어요")
+    .replace(new RegExp(`않는다${sentenceEnd}`, "g"), "않아요")
+    .replace(new RegExp(`필요하다${sentenceEnd}`, "g"), "필요해요")
+    .replace(new RegExp(`가능하다${sentenceEnd}`, "g"), "가능해요")
+    .replace(new RegExp(`적절하다${sentenceEnd}`, "g"), "적절해요")
+    .replace(new RegExp(`([가-힣]+)하다${sentenceEnd}`, "g"), "$1해요")
+    .replace(new RegExp(`안정적이다${sentenceEnd}`, "g"), "안정적이에요")
+    .replace(new RegExp(`흐름이다${sentenceEnd}`, "g"), "흐름이에요")
+    .replace(new RegExp(`상황이다${sentenceEnd}`, "g"), "상황이에요")
+    .replace(new RegExp(`시점이다${sentenceEnd}`, "g"), "시점이에요")
+    .replace(new RegExp(`우선이다${sentenceEnd}`, "g"), "우선이에요")
+    .replace(new RegExp(`아니다${sentenceEnd}`, "g"), "아니에요")
+    .replace(new RegExp(`단계다${sentenceEnd}`, "g"), "단계예요")
+    .replace(new RegExp(`상태다${sentenceEnd}`, "g"), "상태예요")
+    .replace(new RegExp(`별개다${sentenceEnd}`, "g"), "별개예요")
+    .replace(new RegExp(`시기다${sentenceEnd}`, "g"), "시기예요")
+    .replace(new RegExp(`([가-힣]+)이다${sentenceEnd}`, "g"), (_, noun: string) => koreanCopula(noun))
+    .replace(new RegExp(`입니다${sentenceEnd}`, "g"), "이에요")
+    .replace(new RegExp(`하십시오${sentenceEnd}`, "g"), "하세요");
+}
+
 export function detectQuestionCategory(question: string): QuestionCategory {
   const normalized = question.toLowerCase();
+  if (extractBinaryChoices(question)) return "decision";
   if (/관계|연애|사랑|상대|친구|가족|마음|연락|재회|relationship|romance|love|partner|friend|family|reconnect/.test(normalized)) return "relationship";
   if (/직장|이직|취업|일|진로|학업|시험|프로젝트|사업|돈|재정|career|job|work|study|exam|project|business|money|finance/.test(normalized)) return "work";
   if (/선택|결정|비교|어느|할까|해야|고려|장단점|진행|choose|choice|decision|compare|option|pros|cons/.test(normalized)) return "decision";
@@ -164,6 +253,7 @@ export function detectQuestionCategory(question: string): QuestionCategory {
 }
 
 function requestedCardCount(question: string, followup: boolean): number {
+  if (extractBinaryChoices(question)) return 2;
   const trimmed = question.trim();
   let count = 2;
   if (trimmed.length >= 35) count = 3;
@@ -240,6 +330,26 @@ const POSITION_LIBRARY_EN: Record<QuestionCategory, ReadingPosition[]> = {
 
 export function designReading(question: string, followup = false, language: ReadingLanguage = "ko"): ReadingPlan {
   const category = detectQuestionCategory(question);
+  const choices = extractBinaryChoices(question);
+  if (choices) {
+    const positions = choices.map((choice, index) => ({
+      id: `${followup ? "followup" : "initial"}-${index + 1}-option`,
+      title: language === "ko" ? `${choice} 메뉴 선택` : `${choice} option`,
+      focus: language === "ko"
+        ? `${choice} 메뉴 선택에 카드가 주는 지지와 주의 신호`
+        : `Support and caution signals for choosing ${choice}`,
+    }));
+    return {
+      cardCount: 2,
+      interpretationFrame: language === "ko"
+        ? `${choices[0]}와 ${choices[1]} 중 카드 배열이 더 지지하는 메뉴를 비교해요.`
+        : `Compare which option the spread supports more: ${choices[0]} or ${choices[1]}.`,
+      selectionGuide: language === "ko"
+        ? "각 메뉴에 놓을 카드를 한 장씩 선택해요."
+        : "Select one card for each option.",
+      positions,
+    };
+  }
   const cardCount = requestedCardCount(question, followup);
   const positions = (language === "ko" ? POSITION_LIBRARY : POSITION_LIBRARY_EN)[category].slice(0, cardCount).map((position, index) => ({
     ...position,
@@ -260,9 +370,121 @@ export function designReading(question: string, followup = false, language: Read
 
   return {
     cardCount,
-    interpretationFrame: language === "ko" ? `${categoryFrame} ${cardCount}장의 카드를 분석합니다.` : `${categoryFrame}, using ${cardCount} card${cardCount === 1 ? "" : "s"}.`,
-    selectionGuide: language === "ko" ? `아래 카드 중 ${cardCount}장을 선택하세요. 선택 순서대로 각 자리에 배치됩니다.` : `Select ${cardCount} card${cardCount === 1 ? "" : "s"} below. Cards are assigned by selection order.`,
+    interpretationFrame: language === "ko" ? `${categoryFrame} ${cardCount}장의 카드를 분석해요.` : `${categoryFrame}, using ${cardCount} card${cardCount === 1 ? "" : "s"}.`,
+    selectionGuide: language === "ko" ? `아래 카드 중 ${cardCount}장을 선택해요. 선택 순서대로 각 자리에 배치돼요.` : `Select ${cardCount} card${cardCount === 1 ? "" : "s"} below. Cards are assigned by selection order.`,
     positions,
+  };
+}
+
+function readingResultToHaeyo(result: ReadingResult): ReadingResult {
+  return {
+    ...result,
+    summary: toKoreanHaeyo(result.summary),
+    synthesis: toKoreanHaeyo(result.synthesis),
+    guidance: result.guidance.map(toKoreanHaeyo),
+    cardInterpretations: result.cardInterpretations.map((item) => ({
+      ...item,
+      text: toKoreanHaeyo(item.text),
+      reasoning: item.reasoning ? {
+        sourceMeaning: toKoreanHaeyo(item.reasoning.sourceMeaning),
+        questionConnection: toKoreanHaeyo(item.reasoning.questionConnection),
+        decisionImpact: toKoreanHaeyo(item.reasoning.decisionImpact),
+      } : undefined,
+      evidence: item.evidence.map(toKoreanHaeyo),
+    })),
+    axes: result.axes.map((axis) => ({
+      ...axis,
+      evidence: toKoreanHaeyo(axis.evidence),
+    })),
+    limitation: toKoreanHaeyo(result.limitation),
+  };
+}
+
+function generateBinaryChoiceResult(
+  question: string,
+  choices: BinaryChoices,
+  selectedCards: SelectedCard[],
+): ReadingResult {
+  const comparedCards = selectedCards.slice(0, 2);
+  const scores = comparedCards.map((selected) => {
+    const card = getCard(selected.cardId);
+    const hierarchyWeight = card.arcana === "major" ? 10 : card.rank ? 6 : 3;
+    const orientationBase = selected.reversed ? 43 - hierarchyWeight : 61 + hierarchyWeight;
+    return clampScore(orientationBase);
+  });
+  let winnerIndex = scores[0] > scores[1] ? 0 : 1;
+  if (scores[0] === scores[1]) {
+    winnerIndex = hashText(`${question}|${comparedCards.map((card) => card.cardId).join("|")}`) % 2;
+    scores[winnerIndex] += 1;
+  }
+  const loserIndex = winnerIndex === 0 ? 1 : 0;
+  const winner = choices[winnerIndex];
+  const difference = Math.abs(scores[0] - scores[1]);
+  const uncertainty = Math.max(12, 28 - difference);
+  const support = Math.min(72, 54 + difference);
+  const caution = 100 - support - uncertainty;
+  const cardInterpretations = comparedCards.map((selected, index): CardInterpretation => {
+    const card = getCard(selected.cardId);
+    const orientation: Orientation = selected.reversed ? "reversed" : "upright";
+    const meaning = card[orientation];
+    const option = choices[index];
+    const isWinner = index === winnerIndex;
+    const signalTier = card.arcana === "major" ? "메이저 아르카나" : card.rank ? "코트 카드" : "마이너 아르카나";
+    const supportsOption = orientation === "upright";
+    return {
+      cardId: card.id,
+      positionTitle: selected.positionTitle,
+      orientation,
+      text: isWinner
+        ? `${option} 메뉴 쪽이 두 카드 중 더 강하게 지지돼요.`
+        : supportsOption
+          ? `${option} 메뉴도 지지되지만 상대 카드의 신호가 더 강해요.`
+          : `${option} 메뉴 쪽에는 주의 신호가 나타나요.`,
+      reasoning: {
+        sourceMeaning: toKoreanHaeyo(`${card.nameKo} ${orientation === "upright" ? "정방향" : "역방향"}은 ${meaning.summary}`),
+        questionConnection: `${selected.positionTitle} 자리에서는 ${option} 메뉴를 선택하는 행동만 살펴요. ${card.nameKo}의 ${meaning.keywords.slice(0, 2).join("·")} 의미와 ${orientation === "upright" ? "정방향의 지지" : "역방향의 주의"}를 반영하고, ${signalTier}의 신호 강도를 두 메뉴 비교에 사용했어요.`,
+        decisionImpact: isWinner
+          ? `${option} 선택 카드의 점수가 상대 선택지보다 높아서 이번 결론은 ${withParticle(option, "을", "를")} 우선해요.`
+          : `${option} 자체가 나쁘다는 뜻은 아니지만, 이번 두 카드의 비교에서는 ${withParticle(choices[winnerIndex], "을", "를")} 먼저 골라요.`,
+      },
+      evidence: [
+        `${orientation === "upright" ? "정방향" : "역방향"} · ${meaning.keywords.slice(0, 2).join(" · ")}`,
+        `자리 · ${selected.positionTitle}`,
+      ],
+    };
+  });
+  const cards = comparedCards.map((selected) => getCard(selected.cardId));
+
+  return {
+    summary: `이번 카드 배열에서는 ${withParticle(winner, "을", "를")} 골라요. 두 카드의 방향과 핵심 의미를 비교하면 ${winner} 쪽 신호가 더 강해요.`,
+    cardInterpretations,
+    synthesis: `${cards[0].nameKo} 카드는 ${choices[0]} 선택에 ${comparedCards[0].reversed ? "주의" : winnerIndex === 0 ? "더 큰 지지" : "지지"}를 더해요. ${cards[1].nameKo} 카드는 ${choices[1]} 선택에 ${comparedCards[1].reversed ? "주의" : winnerIndex === 1 ? "더 큰 지지" : "지지"}를 더해요.`,
+    guidance: [
+      `이번에는 ${withParticle(winner, "을", "를")} 우선 골라요.`,
+      "실제 주문 가능 여부나 피해야 할 재료가 있다면 그 정보는 카드 결론보다 먼저 확인해요.",
+    ],
+    axes: [
+      {
+        label: `${choices[0]} 선택`,
+        score: scores[0],
+        evidence: `${cards[0].nameKo} ${comparedCards[0].reversed ? "역방향" : "정방향"}의 선택 신호를 반영했어요.`,
+        evidenceCardIds: [cards[0].id],
+      },
+      {
+        label: `${choices[1]} 선택`,
+        score: scores[1],
+        evidence: `${cards[1].nameKo} ${comparedCards[1].reversed ? "역방향" : "정방향"}의 선택 신호를 반영했어요.`,
+        evidenceCardIds: [cards[1].id],
+      },
+      {
+        label: "결론 선명도",
+        score: clampScore(52 + difference * 2),
+        evidence: `${winner} 선택 점수가 다른 메뉴보다 ${difference}점 높아요.`,
+        evidenceCardIds: [cards[winnerIndex].id, cards[loserIndex].id],
+      },
+    ],
+    signals: { support, caution, uncertainty },
+    limitation: "이 결론은 두 카드의 배열로 메뉴 하나를 고른 타로 해석이에요. 맛·영양·건강에 관한 사실 판단은 아니에요.",
   };
 }
 
@@ -316,6 +538,10 @@ export function generateReadingResult(
   const latestCards = previous
     ? selectedCards.filter((card) => card.round === latestRound)
     : selectedCards;
+  const choices = extractBinaryChoices(question);
+  if (language === "ko" && choices && latestCards.length >= 2) {
+    return generateBinaryChoiceResult(question, choices, latestCards);
+  }
   const cardInterpretations = latestCards.map((selected) => {
     const card = getCard(selected.cardId);
     const orientation: Orientation = selected.reversed ? "reversed" : "upright";
@@ -406,7 +632,7 @@ export function generateReadingResult(
       "Review the reversed cards as constraints or delays rather than fixed negative outcomes.",
     ].slice(0, Math.max(2, Math.min(4, latestCards.length + 1)));
 
-  return {
+  const result: ReadingResult = {
     summary,
     cardInterpretations,
     synthesis,
@@ -415,6 +641,7 @@ export function generateReadingResult(
     signals: { support, caution, uncertainty },
     limitation: language === "ko" ? "이 수치는 실제 사건의 확률이 아니라 질문과 카드 관계를 정규화한 AI 해석 지표다. 확인되지 않은 타인의 감정이나 미래 결과를 사실로 확정하지 않는다." : "These values are normalized AI interpretation indicators, not probabilities of real events. They do not establish another person's unverified feelings or a future outcome as fact.",
   };
+  return language === "ko" ? readingResultToHaeyo(result) : result;
 }
 
 export function orientationLabel(reversed: boolean, language: ReadingLanguage = "ko"): string {

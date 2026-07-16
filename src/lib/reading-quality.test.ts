@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { enforceReadingQuality, groundPositionConnection, polishReadingLanguage } from "./reading-quality";
+import { enforcePlanQuality, enforceReadingQuality, groundPositionConnection, polishReadingLanguage } from "./reading-quality";
 import type { ReadingResult } from "./tarot";
 
 const baseResult: ReadingResult = {
@@ -164,6 +164,65 @@ const scheduleResult: ReadingResult = {
 };
 
 describe("enforceReadingQuality", () => {
+  it("rejects invented physical food criteria in a two-menu plan", () => {
+    expect(() => enforcePlanQuality({
+      cardCount: 2,
+      interpretationFrame: "김치찌개와 애호박찌개를 비교해요.",
+      selectionGuide: "카드를 골라요.",
+      positions: [
+        { id: "a", title: "김치찌개 메뉴 선택", focus: "김치찌개의 재료 구성과 포만감을 예측해요." },
+        { id: "b", title: "애호박찌개 메뉴 선택", focus: "애호박찌개의 조리 방식과 영양을 예측해요." },
+      ],
+    }, {
+      question: "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘",
+      language: "ko",
+    })).toThrow(/음식의 맛·영양·조리 특성/);
+  });
+
+  it("accepts one explicit verdict for a two-menu question", () => {
+    const directResult: ReadingResult = {
+      ...baseResult,
+      summary: "이번 카드 배열에서는 김치찌개를 골라요. 두 메뉴의 선택 카드를 비교하면 김치찌개 쪽 신호가 더 강해요.",
+      guidance: ["이번에는 김치찌개 메뉴를 골라요.", "실제 주문 가능 여부를 확인해요."],
+      cardInterpretations: baseResult.cardInterpretations.slice(0, 2),
+    };
+    expect(enforceReadingQuality(directResult, {
+      question: "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘",
+      language: "ko",
+      sourceSentences: [],
+      expectedCards: expectedCards.slice(0, 2),
+    })).toBe(directResult);
+  });
+
+  it("rejects a two-menu reading that avoids choosing either option", () => {
+    const undecidedResult: ReadingResult = {
+      ...baseResult,
+      summary: "김치찌개와 애호박찌개는 각각 장점이 있어요. 상황에 따라 조건을 더 확인해요.",
+      cardInterpretations: baseResult.cardInterpretations.slice(0, 2),
+    };
+    expect(() => enforceReadingQuality(undecidedResult, {
+      question: "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘",
+      language: "ko",
+      sourceSentences: [],
+      expectedCards: expectedCards.slice(0, 2),
+    })).toThrow(/하나만 직접 골라야/);
+  });
+
+  it("rejects guidance that reopens a completed two-menu verdict", () => {
+    const reopenedResult: ReadingResult = {
+      ...baseResult,
+      summary: "이번 카드 배열에서는 김치찌개를 골라요. 김치찌개 쪽 신호가 더 강해요.",
+      guidance: ["김치찌개를 고른다면 바로 준비해요.", "애호박찌개를 고른다면 재료를 확인해요.", "두 메뉴 중 조리가 쉬운 것을 골라요."],
+      cardInterpretations: baseResult.cardInterpretations.slice(0, 2),
+    };
+    expect(() => enforceReadingQuality(reopenedResult, {
+      question: "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘",
+      language: "ko",
+      sourceSentences: [],
+      expectedCards: expectedCards.slice(0, 2),
+    })).toThrow(/결론을 다시/);
+  });
+
   it("accepts concrete Korean tied to an everyday question", () => {
     expect(enforceReadingQuality(baseResult, {
       question: "아침 식사 선택",
@@ -213,7 +272,7 @@ describe("enforceReadingQuality", () => {
       language: "ko",
       sourceSentences: [],
       expectedCards,
-    })).toThrow(/문체/);
+    })).toThrow(/해요체/);
   });
 
   it("accepts a Cups Knight reversed explanation that connects source meaning to the food decision", () => {
@@ -298,7 +357,7 @@ describe("enforceReadingQuality", () => {
       ...scheduleResult,
       synthesis: "**전차**는 `우선순위`를 정하고 첫 작업에 착수하라는 근거가 된다.",
     }, "오늘 해야 할 일을 정할 때 무엇을 우선할까?", "ko");
-    expect(polished.synthesis).toBe("전차는 우선순위를 정하고 첫 작업에 착수하라는 근거가 된다.");
+    expect(polished.synthesis).toBe("전차는 우선순위를 정하고 첫 작업에 착수하라는 근거가 돼요.");
   });
 
   it("removes Markdown decoration from English plain-text results", () => {
@@ -331,7 +390,8 @@ describe("enforceReadingQuality", () => {
         },
       }],
     }, "오늘 해야 할 일을 정할 때 무엇을 우선할까?", "ko");
-    expect(polished.cardInterpretations[0].reasoning?.sourceMeaning).toBe(sourceMeaning);
+    expect(polished.cardInterpretations[0].reasoning?.sourceMeaning)
+      .toBe("별 정방향의 핵심은 희망·회복·방향성이에요. 다시 목표를 바라볼 수 있는 흐름이에요.");
     expect(polished.cardInterpretations[0].reasoning?.questionConnection).toContain("목표를 정하고");
   });
 
@@ -349,13 +409,13 @@ describe("enforceReadingQuality", () => {
         },
       }],
     }, "오늘 해야 할 일을 정할 때 무엇을 우선할까?", "ko");
-    expect(polished.summary).toBe("오늘 일정과 오늘의 핵심 목표를 세우고 오늘 일정의 재정비를 시작한다.");
-    expect(polished.guidance[0]).toBe("우선 기준으로 오늘 할 일을 정한다.");
-    expect(polished.guidance[1]).toBe("오늘 일정의 재정비로 이어지고 일정 유지로 판단한다.");
+    expect(polished.summary).toBe("오늘 일정과 오늘의 핵심 목표를 세우고 오늘 일정의 재정비를 시작해요.");
+    expect(polished.guidance[0]).toBe("우선 기준으로 오늘 할 일을 정해요.");
+    expect(polished.guidance[1]).toBe("오늘 일정의 재정비로 이어지고 일정 유지로 판단해요.");
     expect(polished.cardInterpretations[0].reasoning?.questionConnection)
-      .toBe("회복과 목표 설정이라는 카드 원뜻이 이 자리에서 살필 오늘 할 일과 연결된다.");
+      .toBe("회복과 목표 설정이라는 카드 원뜻이 이 자리에서 살필 오늘 할 일과 연결돼요.");
     expect(polished.cardInterpretations[0].reasoning?.decisionImpact)
-      .toBe("회복과 목표 설정이라는 카드 원뜻을 이 자리에서 살필 오늘 할 일에 적용한다.");
+      .toBe("회복과 목표 설정이라는 카드 원뜻을 이 자리에서 살필 오늘 할 일에 적용해요.");
   });
 
   it("accepts a physical limitation regardless of Korean word order", () => {
@@ -567,8 +627,8 @@ describe("enforceReadingQuality", () => {
         },
       }, ...baseResult.cardInterpretations.slice(1)],
     }, "아침 식사 선택", "ko");
-    expect(polished.guidance[0]).toBe("오전까지 오래가는 포만감을 고려해 식사를 구성한다.");
-    expect(polished.cardInterpretations[0].reasoning?.questionConnection).toBe("선택 속도 자리에서는 오전까지 오래가는 포만감을 확인한다.");
+    expect(polished.guidance[0]).toBe("오전까지 오래가는 포만감을 고려해 식사를 구성해요.");
+    expect(polished.cardInterpretations[0].reasoning?.questionConnection).toBe("선택 속도 자리에서는 오전까지 오래가는 포만감을 확인해요.");
   });
 
   it("replaces internal schema terms without dropping Korean particles", () => {
@@ -583,6 +643,6 @@ describe("enforceReadingQuality", () => {
       }],
     }, "아침 뭐먹을까", "ko");
     expect(polished.cardInterpretations[0].reasoning?.questionConnection)
-      .toBe("자리 초점을 확인하고 자리 이름에 연결한다.");
+      .toBe("자리 초점을 확인하고 자리 이름에 연결해요.");
   });
 });

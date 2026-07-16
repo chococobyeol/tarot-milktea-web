@@ -24,7 +24,7 @@ npm install
 npm run dev
 ```
 
-기본 주소는 `http://localhost:3000`입니다. Wrangler에 Cloudflare 계정 로그인이 되어 있으면 로컬 개발에서도 `AI` 바인딩을 통해 실제 Workers AI를 호출합니다. 로그인이 없거나 AI 바인딩을 제거한 환경에서는 동일한 응답 스키마를 사용하는 규칙 기반 로컬 해석 모드로 동작합니다. 로컬 Workers AI 호출도 계정 사용량에 포함됩니다.
+기본 주소는 `http://localhost:3000`입니다. Wrangler에 Cloudflare 계정 로그인이 되어 있으면 로컬 개발에서도 `AI` 바인딩을 통해 실제 Workers AI를 호출합니다. AI 바인딩이 없거나 모델 응답이 시간·형식·품질 기준을 통과하지 못하면 동일한 응답 스키마를 사용하는 규칙 기반 해석으로 공개 흐름을 이어 갑니다. 로컬 Workers AI 호출도 계정 사용량에 포함됩니다.
 
 ## 확인 명령
 
