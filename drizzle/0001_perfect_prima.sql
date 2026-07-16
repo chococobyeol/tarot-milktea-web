@@ -1,0 +1,1 @@
+CREATE INDEX `tarot_sessions_expires_at_idx` ON `tarot_sessions` (`expires_at`);

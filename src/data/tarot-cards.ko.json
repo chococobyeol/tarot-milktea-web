@@ -1,0 +1,479 @@
+{
+  "version": 1,
+  "language": "ko",
+  "sourceNote": "공개 도메인 역사 자료와 일반적인 타로 상징을 참고해 타로밀크티 웹의 중립적 문체로 새로 작성한 해석 데이터입니다.",
+  "cards": [
+    {
+      "id": "major-00", "nameKo": "바보", "nameEn": "The Fool", "arcana": "major", "number": 0,
+      "upright": { "keywords": ["시작", "자유", "탐색"], "summary": "경험이 충분하지 않더라도 새로운 가능성을 시험하며 움직이는 단계다.", "caution": "준비 부족과 위험 신호를 낙관으로 덮지 말아야 한다." },
+      "reversed": { "keywords": ["충동", "회피", "준비 부족"], "summary": "자유로운 선택이 아니라 책임 회피나 근거 없는 도약으로 흐를 수 있다.", "caution": "시작을 미루는 두려움과 무계획한 행동을 구분해야 한다." },
+      "contexts": { "relationship": "새로운 관계 방식이나 거리 조정", "work": "익숙하지 않은 분야의 첫 시도", "decision": "작게 시험한 뒤 확대하는 선택", "self": "기존 역할에서 벗어난 탐색" }
+    },
+    {
+      "id": "major-01", "nameKo": "마법사", "nameEn": "The Magician", "arcana": "major", "number": 1,
+      "upright": { "keywords": ["실행", "기술", "집중"], "summary": "이미 가진 자원과 능력을 조합해 의도를 실제 행동으로 옮길 수 있다.", "caution": "능력을 과장하거나 수단을 목적처럼 다루지 말아야 한다." },
+      "reversed": { "keywords": ["왜곡", "미숙", "분산"], "summary": "도구는 있으나 목표가 흐리거나 말과 실제 실행이 맞지 않을 수 있다.", "caution": "조작적인 설명과 실력 이상의 약속을 점검해야 한다." },
+      "contexts": { "relationship": "표현과 행동의 일치", "work": "기술을 결과로 전환하는 능력", "decision": "사용 가능한 자원의 현실적 조합", "self": "자기 효능감과 집중력" }
+    },
+    {
+      "id": "major-02", "nameKo": "여사제", "nameEn": "The High Priestess", "arcana": "major", "number": 2,
+      "upright": { "keywords": ["관찰", "내면", "숨은 정보"], "summary": "즉시 결론을 내리기보다 드러나지 않은 정보와 자신의 반응을 관찰해야 한다.", "caution": "침묵을 무조건 긍정으로 해석하지 말아야 한다." },
+      "reversed": { "keywords": ["혼란", "단절", "비밀"], "summary": "직관과 불안이 섞여 판단 기준이 흐려지거나 중요한 정보가 차단될 수 있다.", "caution": "추측만으로 상대나 상황의 의도를 확정하지 말아야 한다." },
+      "contexts": { "relationship": "말하지 않은 감정과 경계", "work": "공개되지 않은 조건의 확인", "decision": "자료를 더 모은 뒤 판단", "self": "내부 신호와 불안의 구분" }
+    },
+    {
+      "id": "major-03", "nameKo": "여제", "nameEn": "The Empress", "arcana": "major", "number": 3,
+      "upright": { "keywords": ["성장", "돌봄", "풍요"], "summary": "시간과 관심을 투입한 대상이 안정적으로 자라며 결과를 만들어 가는 흐름이다.", "caution": "돌봄이 과잉 개입이나 자기 소진이 되지 않게 해야 한다." },
+      "reversed": { "keywords": ["고갈", "과보호", "정체"], "summary": "주고받는 균형이 깨지거나 성장을 재촉해 오히려 흐름이 막힐 수 있다.", "caution": "타인을 돌보느라 자신의 자원 상태를 무시하지 말아야 한다." },
+      "contexts": { "relationship": "안정감과 상호 돌봄", "work": "결과를 키우는 장기 투자", "decision": "지속 가능한 선택", "self": "휴식과 창조성 회복" }
+    },
+    {
+      "id": "major-04", "nameKo": "황제", "nameEn": "The Emperor", "arcana": "major", "number": 4,
+      "upright": { "keywords": ["구조", "책임", "통제"], "summary": "명확한 기준과 역할 분담을 세우면 불안정한 상황을 관리할 수 있다.", "caution": "효율을 이유로 타인의 선택권을 지나치게 제한하지 말아야 한다." },
+      "reversed": { "keywords": ["경직", "권위 충돌", "통제 상실"], "summary": "규칙이 목적을 잃고 권력 다툼이나 과도한 통제로 변할 수 있다.", "caution": "통제 강화보다 구조 자체가 현실에 맞는지 먼저 확인해야 한다." },
+      "contexts": { "relationship": "경계와 책임의 합의", "work": "체계와 의사결정 권한", "decision": "장기 기준에 따른 판단", "self": "자기 관리와 경직성" }
+    },
+    {
+      "id": "major-05", "nameKo": "교황", "nameEn": "The Hierophant", "arcana": "major", "number": 5,
+      "upright": { "keywords": ["전통", "학습", "공식 절차"], "summary": "검증된 기준, 제도 또는 경험자의 조언을 활용하는 것이 안정적이다.", "caution": "관례가 현재 상황에도 유효한지 확인해야 한다." },
+      "reversed": { "keywords": ["관습 거부", "독단", "형식주의"], "summary": "기존 규칙이 맞지 않거나 반대로 규칙을 거부하는 태도 자체가 목적이 될 수 있다.", "caution": "새로운 방식을 택할 때 대안의 책임 구조도 함께 세워야 한다." },
+      "contexts": { "relationship": "공식성·약속에 대한 기준", "work": "교육과 조직 규범", "decision": "전문가 의견과 절차 검토", "self": "자신이 따르는 가치 체계" }
+    },
+    {
+      "id": "major-06", "nameKo": "연인", "nameEn": "The Lovers", "arcana": "major", "number": 6,
+      "upright": { "keywords": ["선택", "결합", "가치 일치"], "summary": "관계나 선택의 핵심은 서로의 가치와 책임이 실제로 맞는지 확인하는 데 있다.", "caution": "끌림만으로 장기적인 적합성을 대신하지 말아야 한다." },
+      "reversed": { "keywords": ["불일치", "회피", "갈등"], "summary": "감정과 가치, 말과 행동 사이의 불일치가 선택을 어렵게 만들 수 있다.", "caution": "결정을 미루기 위해 모호한 관계를 유지하지 말아야 한다." },
+      "contexts": { "relationship": "상호 선택과 가치의 합의", "work": "협업 상대와 목적의 정렬", "decision": "무엇을 포기할지 포함한 선택", "self": "욕구와 기준의 일치" }
+    },
+    {
+      "id": "major-07", "nameKo": "전차", "nameEn": "The Chariot", "arcana": "major", "number": 7,
+      "upright": { "keywords": ["추진", "방향", "의지"], "summary": "서로 다른 요구를 한 방향으로 조정하면 빠르게 진전시킬 수 있다.", "caution": "속도 때문에 세부 위험이나 타인의 신호를 무시하지 말아야 한다." },
+      "reversed": { "keywords": ["방향 상실", "과속", "충돌"], "summary": "목표는 있으나 통제되지 않은 추진력이나 상충하는 요구로 흐름이 흔들릴 수 있다.", "caution": "더 세게 밀기 전에 목표와 수단의 정렬을 다시 확인해야 한다." },
+      "contexts": { "relationship": "관계의 방향과 주도권", "work": "일정 추진과 자원 통제", "decision": "우선순위를 하나로 모으는 판단", "self": "충동을 목적에 맞게 조절" }
+    },
+    {
+      "id": "major-08", "nameKo": "힘", "nameEn": "Strength", "arcana": "major", "number": 8,
+      "upright": { "keywords": ["인내", "자기 조절", "용기"], "summary": "강압보다 꾸준한 조절과 침착함이 상황을 바꾸는 힘이 된다.", "caution": "참는 것과 문제를 방치하는 것을 혼동하지 말아야 한다." },
+      "reversed": { "keywords": ["자신감 저하", "감정 폭주", "소진"], "summary": "불안이나 피로가 커져 평소의 판단력과 자기 통제가 약해질 수 있다.", "caution": "의지 부족으로 단정하기 전에 회복 자원과 압박 수준을 확인해야 한다." },
+      "contexts": { "relationship": "감정 조절과 안전한 표현", "work": "지속력과 압박 관리", "decision": "즉각 반응하지 않는 선택", "self": "두려움을 다루는 방식" }
+    },
+    {
+      "id": "major-09", "nameKo": "은둔자", "nameEn": "The Hermit", "arcana": "major", "number": 9,
+      "upright": { "keywords": ["성찰", "거리", "탐구"], "summary": "외부 의견에서 잠시 거리를 두고 자신의 기준과 사실을 정리할 필요가 있다.", "caution": "혼자 생각하는 시간이 고립이나 결정 회피로 길어지지 않게 해야 한다." },
+      "reversed": { "keywords": ["고립", "폐쇄", "회피"], "summary": "필요한 도움까지 차단하거나 생각만 반복하며 현실 접촉이 줄어들 수 있다.", "caution": "독립성과 단절을 구분하고 검증 가능한 피드백을 받아야 한다." },
+      "contexts": { "relationship": "거리의 필요성과 소통 중단", "work": "전문성 축적과 독립 작업", "decision": "외부 압력에서 벗어난 검토", "self": "고독과 고립의 경계" }
+    },
+    {
+      "id": "major-10", "nameKo": "운명의 수레바퀴", "nameEn": "Wheel of Fortune", "arcana": "major", "number": 10,
+      "upright": { "keywords": ["전환", "주기", "기회"], "summary": "개인의 통제 밖에서 조건이 변하며 이전과 다른 선택지가 열리는 시점이다.", "caution": "좋은 흐름도 자동으로 유지된다고 가정하지 말아야 한다." },
+      "reversed": { "keywords": ["반복", "지연", "불운감"], "summary": "익숙한 패턴이 되풀이되거나 변화에 적응하지 못해 기회를 놓칠 수 있다.", "caution": "모든 원인을 운으로 돌리기보다 반복되는 대응 방식을 점검해야 한다." },
+      "contexts": { "relationship": "관계 단계의 변화", "work": "외부 환경과 타이밍", "decision": "변화에 대응할 여지 확보", "self": "반복 패턴의 인식" }
+    },
+    {
+      "id": "major-11", "nameKo": "정의", "nameEn": "Justice", "arcana": "major", "number": 11,
+      "upright": { "keywords": ["균형", "책임", "사실"], "summary": "감정과 별개로 사실, 기준과 결과의 연결을 분명히 해야 한다.", "caution": "형식적인 공평함이 현실의 차이를 가리지 않는지 확인해야 한다." },
+      "reversed": { "keywords": ["편향", "불공정", "책임 회피"], "summary": "판단 기준이 일관되지 않거나 누군가가 결과에 대한 책임을 피하고 있을 수 있다.", "caution": "자신에게 유리한 정보만 선택하고 있지 않은지 점검해야 한다." },
+      "contexts": { "relationship": "약속과 책임의 균형", "work": "계약·평가 기준 확인", "decision": "근거와 결과를 비교하는 판단", "self": "자기 합리화 점검" }
+    },
+    {
+      "id": "major-12", "nameKo": "매달린 사람", "nameEn": "The Hanged Man", "arcana": "major", "number": 12,
+      "upright": { "keywords": ["정지", "관점 전환", "유예"], "summary": "즉시 움직이기보다 기존 해석을 뒤집어 보고 기다림의 의미를 확인할 단계다.", "caution": "희생이나 지연을 무조건 가치 있는 것으로 만들지 말아야 한다." },
+      "reversed": { "keywords": ["무의미한 희생", "정체", "저항"], "summary": "기다림이 더 이상 정보를 주지 않는데도 익숙한 정체를 유지할 수 있다.", "caution": "포기한 비용 때문에 잘못된 상태를 계속하지 말아야 한다." },
+      "contexts": { "relationship": "관계 관점과 일방적 희생", "work": "보류된 계획의 재평가", "decision": "결정 유예의 실제 이익", "self": "통제할 수 없는 상황의 수용" }
+    },
+    {
+      "id": "major-13", "nameKo": "죽음", "nameEn": "Death", "arcana": "major", "number": 13,
+      "upright": { "keywords": ["종료", "전환", "정리"], "summary": "기존 상태를 끝내야 다음 단계가 가능하며, 핵심은 상실보다 구조의 변화에 있다.", "caution": "급격한 단절이 필요한 정리까지 훼손하지 않게 해야 한다." },
+      "reversed": { "keywords": ["변화 저항", "미련", "지연"], "summary": "이미 기능을 잃은 관계나 방식을 붙잡아 전환이 길어질 수 있다.", "caution": "익숙함을 안전함으로 오해하고 있지 않은지 확인해야 한다." },
+      "contexts": { "relationship": "관계 방식의 종료와 재구성", "work": "역할·프로젝트의 전환", "decision": "유지 비용과 종료 비용 비교", "self": "낡은 정체성 정리" }
+    },
+    {
+      "id": "major-14", "nameKo": "절제", "nameEn": "Temperance", "arcana": "major", "number": 14,
+      "upright": { "keywords": ["조율", "중간점", "회복"], "summary": "서로 다른 요소를 무리 없이 섞고 속도를 조절하면 안정적인 개선이 가능하다.", "caution": "갈등을 피하려는 타협이 핵심 문제를 흐리지 않게 해야 한다." },
+      "reversed": { "keywords": ["불균형", "과잉", "조급함"], "summary": "시간, 감정 또는 자원의 배분이 한쪽으로 치우쳐 회복력이 떨어질 수 있다.", "caution": "한 번에 해결하려는 시도보다 불균형의 원인을 나눠 봐야 한다." },
+      "contexts": { "relationship": "속도와 기대치 조율", "work": "자원 배분과 협업", "decision": "극단 사이의 실행 가능한 선택", "self": "생활 리듬과 회복" }
+    },
+    {
+      "id": "major-15", "nameKo": "악마", "nameEn": "The Devil", "arcana": "major", "number": 15,
+      "upright": { "keywords": ["집착", "의존", "제약"], "summary": "즉각적인 만족이나 익숙한 두려움이 선택 범위를 좁히고 있을 수 있다.", "caution": "벗어날 수 없다는 생각 자체가 제약을 강화하지 않는지 확인해야 한다." },
+      "reversed": { "keywords": ["인식", "해방", "재발 위험"], "summary": "의존 구조를 알아차리고 벗어나려 하지만 이전 패턴으로 돌아갈 가능성도 남아 있다.", "caution": "의지만 믿기보다 환경과 반복 조건을 함께 바꿔야 한다." },
+      "contexts": { "relationship": "통제·의존 관계 점검", "work": "보상과 소진의 고리", "decision": "단기 만족의 장기 비용", "self": "수치심 없이 패턴을 인식" }
+    },
+    {
+      "id": "major-16", "nameKo": "탑", "nameEn": "The Tower", "arcana": "major", "number": 16,
+      "upright": { "keywords": ["붕괴", "충격", "사실 공개"], "summary": "유지되던 전제가 깨지며 불편하지만 현실적인 재구성이 필요해진다.", "caution": "충격 속에서 모든 것을 동시에 결정하지 말아야 한다." },
+      "reversed": { "keywords": ["붕괴 지연", "위기 회피", "내부 균열"], "summary": "문제를 알고도 외형을 유지하거나 변화가 내부에서 천천히 진행될 수 있다.", "caution": "피할 수 있는 피해와 피할 수 없는 변화를 구분해야 한다." },
+      "contexts": { "relationship": "숨겨진 문제의 표면화", "work": "전제와 계획의 급변", "decision": "손실을 제한하는 우선순위", "self": "믿음 체계의 재검토" }
+    },
+    {
+      "id": "major-17", "nameKo": "별", "nameEn": "The Star", "arcana": "major", "number": 17,
+      "upright": { "keywords": ["회복", "희망", "방향성"], "summary": "큰 혼란 뒤에 다시 기준을 세우고 장기적인 회복을 시작할 수 있다.", "caution": "희망을 구체적인 회복 행동과 연결해야 한다." },
+      "reversed": { "keywords": ["낙담", "불신", "회복 지연"], "summary": "가능성이 있어도 자신이나 과정에 대한 신뢰가 약해 결과를 체감하기 어렵다.", "caution": "현재의 피로를 미래 전체에 대한 결론으로 확대하지 말아야 한다." },
+      "contexts": { "relationship": "신뢰 회복과 솔직한 기대", "work": "장기 목표 재설정", "decision": "회복 가능성을 남기는 선택", "self": "자기 신뢰 재건" }
+    },
+    {
+      "id": "major-18", "nameKo": "달", "nameEn": "The Moon", "arcana": "major", "number": 18,
+      "upright": { "keywords": ["불확실성", "불안", "상상"], "summary": "정보가 충분하지 않아 감정과 추측이 현실 판단에 크게 개입하는 상황이다.", "caution": "느낌을 무시하지 않되 사실로 확정하지도 말아야 한다." },
+      "reversed": { "keywords": ["혼란 해소", "왜곡 노출", "두려움 직면"], "summary": "감춰진 사실이 드러나거나 불안을 만든 구조를 조금씩 파악할 수 있다.", "caution": "새 정보 하나로 모든 의심이 해결됐다고 단정하지 말아야 한다." },
+      "contexts": { "relationship": "오해와 불분명한 신호", "work": "정보 부족과 소문", "decision": "검증 전 가정 표시", "self": "불안과 직관의 구분" }
+    },
+    {
+      "id": "major-19", "nameKo": "태양", "nameEn": "The Sun", "arcana": "major", "number": 19,
+      "upright": { "keywords": ["명확성", "활력", "성과"], "summary": "상황과 의도가 분명해지고 성과를 확인하거나 공개하기 좋은 흐름이다.", "caution": "긍정적인 결과가 모든 세부 문제를 없애는 것은 아니다." },
+      "reversed": { "keywords": ["과신", "지연된 기쁨", "피로"], "summary": "기본 흐름은 나쁘지 않지만 기대가 과도하거나 성과를 체감하기 어려울 수 있다.", "caution": "낙관과 현실적인 일정·자원 평가를 함께 유지해야 한다." },
+      "contexts": { "relationship": "솔직함과 함께하는 즐거움", "work": "가시적 성과와 인정", "decision": "명확한 정보에 따른 진행", "self": "활력과 자기 표현" }
+    },
+    {
+      "id": "major-20", "nameKo": "심판", "nameEn": "Judgement", "arcana": "major", "number": 20,
+      "upright": { "keywords": ["평가", "각성", "재결정"], "summary": "과거 결과를 인정하고 같은 문제에 대해 더 나은 기준으로 다시 결정할 시점이다.", "caution": "반성만 반복하지 말고 다음 행동을 구체화해야 한다." },
+      "reversed": { "keywords": ["자기 비난", "결정 회피", "교훈 거부"], "summary": "과거 평가에 매이거나 책임을 피하면서 같은 판단을 반복할 수 있다.", "caution": "실수의 인정과 자신 전체에 대한 부정적 평가를 구분해야 한다." },
+      "contexts": { "relationship": "과거 문제의 재평가", "work": "성과 검토와 재도전", "decision": "이전 결과를 반영한 최종 판단", "self": "자기 평가 방식의 변화" }
+    },
+    {
+      "id": "major-21", "nameKo": "세계", "nameEn": "The World", "arcana": "major", "number": 21,
+      "upright": { "keywords": ["완성", "통합", "확장"], "summary": "하나의 주기가 충분히 마무리되어 결과를 정리하고 다음 범위로 이동할 수 있다.", "caution": "완성에 대한 집착 때문에 필요한 종료를 늦추지 말아야 한다." },
+      "reversed": { "keywords": ["미완", "마무리 지연", "누락"], "summary": "대부분 진행됐지만 남은 한 요소나 정리되지 않은 책임이 완료를 막고 있다.", "caution": "새 일을 시작하기 전에 남은 조건을 구체적으로 확인해야 한다." },
+      "contexts": { "relationship": "관계 단계의 완성과 전환", "work": "프로젝트 완료와 확장", "decision": "마무리 조건 확인", "self": "경험의 통합" }
+    },
+
+    {
+      "id": "wands-ace", "nameKo": "완드 에이스", "nameEn": "Ace of Wands", "arcana": "minor", "suit": "wands", "rank": "ace",
+      "upright": { "keywords": ["동기", "착수", "창의성"], "summary": "행동을 시작하게 하는 분명한 흥미와 에너지가 생긴다.", "caution": "열정만으로 지속 가능성이 보장되지는 않는다." },
+      "reversed": { "keywords": ["의욕 저하", "지연", "방향 부족"], "summary": "하고 싶은 마음은 있으나 시작 조건이나 방향이 정리되지 않았다.", "caution": "의지 부족으로 단정하기 전에 막는 조건을 찾아야 한다." },
+      "contexts": { "relationship": "새로운 호감이나 활력", "work": "새 프로젝트의 발화점", "decision": "작게 착수해 반응 확인", "self": "욕구와 에너지의 회복" }
+    },
+    {
+      "id": "wands-02", "nameKo": "완드 2", "nameEn": "Two of Wands", "arcana": "minor", "suit": "wands", "rank": "2",
+      "upright": { "keywords": ["계획", "선택지", "전망"], "summary": "현재 위치를 유지할지 더 넓은 범위로 움직일지 계획하는 단계다.", "caution": "계획만 세우며 실제 검증을 미루지 말아야 한다." },
+      "reversed": { "keywords": ["두려움", "좁은 시야", "계획 미흡"], "summary": "익숙함을 벗어나는 부담 때문에 선택 범위를 스스로 줄일 수 있다.", "caution": "위험 회피가 장기 기회까지 막는지 확인해야 한다." },
+      "contexts": { "relationship": "관계의 다음 단계 계획", "work": "확장과 현상 유지 비교", "decision": "선택지별 장기 결과", "self": "안전지대 밖의 가능성" }
+    },
+    {
+      "id": "wands-03", "nameKo": "완드 3", "nameEn": "Three of Wands", "arcana": "minor", "suit": "wands", "rank": "3",
+      "upright": { "keywords": ["확장", "진전", "전망"], "summary": "이미 시작한 일이 외부와 연결되며 다음 결과를 기다리는 단계다.", "caution": "기다리는 동안 필요한 후속 조치를 놓치지 말아야 한다." },
+      "reversed": { "keywords": ["지연", "범위 착오", "협력 문제"], "summary": "예상보다 범위가 좁거나 외부 조건 때문에 진행이 늦어질 수 있다.", "caution": "초기 계획의 전제를 다시 계산해야 한다." },
+      "contexts": { "relationship": "함께 그리는 장기 전망", "work": "시장·협업 범위 확장", "decision": "외부 반응을 반영한 다음 수", "self": "성장 범위의 확대" }
+    },
+    {
+      "id": "wands-04", "nameKo": "완드 4", "nameEn": "Four of Wands", "arcana": "minor", "suit": "wands", "rank": "4",
+      "upright": { "keywords": ["안정", "축하", "기반"], "summary": "진행 과정에서 하나의 안정 지점을 만들고 성과를 함께 확인할 수 있다.", "caution": "일시적 안정과 최종 완료를 혼동하지 말아야 한다." },
+      "reversed": { "keywords": ["불안정", "소속감 부족", "행사 차질"], "summary": "겉으로는 안정돼 보여도 내부 합의나 소속감이 충분하지 않을 수 있다.", "caution": "형식보다 실제로 편안한 기반인지 확인해야 한다." },
+      "contexts": { "relationship": "안정된 약속과 공동 공간", "work": "중간 성과와 팀 결속", "decision": "안정 기반을 먼저 확보", "self": "쉴 수 있는 환경" }
+    },
+    {
+      "id": "wands-05", "nameKo": "완드 5", "nameEn": "Five of Wands", "arcana": "minor", "suit": "wands", "rank": "5",
+      "upright": { "keywords": ["경쟁", "마찰", "의견 충돌"], "summary": "여러 요구와 방식이 부딪히며 우선순위를 시험하는 상황이다.", "caution": "논쟁의 승리보다 결정해야 할 쟁점을 분리해야 한다." },
+      "reversed": { "keywords": ["갈등 회피", "내부 긴장", "소모전"], "summary": "표면적 충돌은 줄었지만 정리되지 않은 경쟁과 불만이 남아 있을 수 있다.", "caution": "평화를 위해 필요한 논의를 생략하지 말아야 한다." },
+      "contexts": { "relationship": "사소한 다툼과 힘겨루기", "work": "역할·아이디어 경쟁", "decision": "충돌하는 기준의 우선순위", "self": "내부 욕구의 경쟁" }
+    },
+    {
+      "id": "wands-06", "nameKo": "완드 6", "nameEn": "Six of Wands", "arcana": "minor", "suit": "wands", "rank": "6",
+      "upright": { "keywords": ["인정", "진전", "자신감"], "summary": "노력이 외부에서 확인되고 다음 단계로 갈 명분이 생긴다.", "caution": "칭찬과 실제 지속 가능성을 분리해 봐야 한다." },
+      "reversed": { "keywords": ["인정 부족", "과시", "자신감 흔들림"], "summary": "성과가 충분히 인정되지 않거나 외부 평가에 지나치게 의존할 수 있다.", "caution": "보여 주기 위한 선택이 목표를 흐리지 않게 해야 한다." },
+      "contexts": { "relationship": "관계에 대한 공개적 인정", "work": "성과 평가와 가시성", "decision": "평판 외의 실질 기준", "self": "외부 인정과 자기 평가" }
+    },
+    {
+      "id": "wands-07", "nameKo": "완드 7", "nameEn": "Seven of Wands", "arcana": "minor", "suit": "wands", "rank": "7",
+      "upright": { "keywords": ["방어", "입장 유지", "도전"], "summary": "확보한 위치나 기준을 지키기 위해 분명한 대응이 필요하다.", "caution": "모든 질문을 공격으로 받아들이지 말아야 한다." },
+      "reversed": { "keywords": ["압도", "방어 포기", "과민"], "summary": "지속되는 압박에 지치거나 반대로 필요 이상으로 방어적일 수 있다.", "caution": "지켜야 할 것과 내려놓아도 되는 것을 구분해야 한다." },
+      "contexts": { "relationship": "경계와 입장 표현", "work": "성과·권한 방어", "decision": "핵심 기준을 지키는 선택", "self": "압박 속 자기 주장" }
+    },
+    {
+      "id": "wands-08", "nameKo": "완드 8", "nameEn": "Eight of Wands", "arcana": "minor", "suit": "wands", "rank": "8",
+      "upright": { "keywords": ["속도", "연락", "전개"], "summary": "막혀 있던 일이 빠르게 연결되고 결정이나 소식이 연달아 올 수 있다.", "caution": "속도가 빠를수록 전달 오류와 일정 충돌을 점검해야 한다." },
+      "reversed": { "keywords": ["지연", "혼선", "성급함"], "summary": "연락과 일정이 엇갈리거나 조급한 대응이 흐름을 더 복잡하게 만들 수 있다.", "caution": "추가 행동 전에 현재 전달 상태를 확인해야 한다." },
+      "contexts": { "relationship": "빠른 연락과 관계 진전", "work": "일정 가속과 다중 업무", "decision": "결정 시간과 정보 속도", "self": "흥분 상태의 조절" }
+    },
+    {
+      "id": "wands-09", "nameKo": "완드 9", "nameEn": "Nine of Wands", "arcana": "minor", "suit": "wands", "rank": "9",
+      "upright": { "keywords": ["지속", "경계", "마지막 점검"], "summary": "피로가 있지만 경험을 바탕으로 마지막 구간을 버틸 수 있다.", "caution": "경계심 때문에 필요한 도움까지 거절하지 말아야 한다." },
+      "reversed": { "keywords": ["소진", "불신", "한계"], "summary": "긴 방어 상태로 체력과 판단력이 떨어져 같은 대응을 반복할 수 있다.", "caution": "계속 버티는 것이 실제 목표에 도움이 되는지 재평가해야 한다." },
+      "contexts": { "relationship": "상처 이후의 경계", "work": "마감 전 피로 관리", "decision": "남은 자원과 유지 비용", "self": "회복 없이 버티는 패턴" }
+    },
+    {
+      "id": "wands-10", "nameKo": "완드 10", "nameEn": "Ten of Wands", "arcana": "minor", "suit": "wands", "rank": "10",
+      "upright": { "keywords": ["부담", "책임", "완수"], "summary": "결과에 가까워졌지만 책임과 업무가 한 사람에게 과도하게 몰려 있다.", "caution": "완수 욕구 때문에 분담 가능한 일까지 떠안지 말아야 한다." },
+      "reversed": { "keywords": ["과부하", "책임 회피", "내려놓기"], "summary": "더는 감당하기 어렵거나 일부 책임을 정리해야 하는 상황이다.", "caution": "무책임한 포기와 필요한 부담 조정을 구분해야 한다." },
+      "contexts": { "relationship": "한쪽에 몰린 정서적 부담", "work": "업무 과부하와 위임", "decision": "추가 책임 수용 여부", "self": "성과와 소진의 균형" }
+    },
+    {
+      "id": "wands-page", "nameKo": "완드 시종", "nameEn": "Page of Wands", "arcana": "minor", "suit": "wands", "rank": "page",
+      "upright": { "keywords": ["호기심", "소식", "실험"], "summary": "새로운 아이디어를 가볍게 시험하거나 흥미로운 소식을 접할 수 있다.", "caution": "흥미가 바뀌어도 최소한의 마무리는 필요하다." },
+      "reversed": { "keywords": ["산만함", "과장", "미숙한 시작"], "summary": "아이디어는 많지만 지속성과 구체성이 부족할 수 있다.", "caution": "큰 선언보다 작은 결과로 가능성을 확인해야 한다." },
+      "contexts": { "relationship": "가벼운 관심과 탐색", "work": "신규 아이디어와 학습", "decision": "저비용 실험", "self": "호기심의 방향" }
+    },
+    {
+      "id": "wands-knight", "nameKo": "완드 기사", "nameEn": "Knight of Wands", "arcana": "minor", "suit": "wands", "rank": "knight",
+      "upright": { "keywords": ["도전", "이동", "열정"], "summary": "빠르게 움직이며 경험을 넓히려는 강한 추진력이 있다.", "caution": "시작의 속도만큼 후속 책임도 계산해야 한다." },
+      "reversed": { "keywords": ["충동", "변덕", "무리한 추진"], "summary": "흥분에 따라 방향을 자주 바꾸거나 위험을 과소평가할 수 있다.", "caution": "즉시 행동해야 한다는 압박을 사실과 구분해야 한다." },
+      "contexts": { "relationship": "강한 끌림과 불안정한 속도", "work": "도전적 실행과 이동", "decision": "속도보다 지속 조건", "self": "충동과 모험 욕구" }
+    },
+    {
+      "id": "wands-queen", "nameKo": "완드 여왕", "nameEn": "Queen of Wands", "arcana": "minor", "suit": "wands", "rank": "queen",
+      "upright": { "keywords": ["자신감", "독립", "영향력"], "summary": "자신의 강점을 분명히 알고 주변의 참여를 이끌 수 있다.", "caution": "자신감이 타인의 속도를 무시하는 태도가 되지 않게 해야 한다." },
+      "reversed": { "keywords": ["질투", "불안정한 자신감", "과도한 통제"], "summary": "외부 비교나 인정 욕구 때문에 반응이 예민해질 수 있다.", "caution": "주도권을 지키려는 행동이 관계를 소모시키는지 확인해야 한다." },
+      "contexts": { "relationship": "독립성과 매력의 균형", "work": "팀을 움직이는 주도성", "decision": "자기 판단에 대한 신뢰", "self": "비교 없이 강점 사용" }
+    },
+    {
+      "id": "wands-king", "nameKo": "완드 왕", "nameEn": "King of Wands", "arcana": "minor", "suit": "wands", "rank": "king",
+      "upright": { "keywords": ["비전", "지도력", "결단"], "summary": "장기 방향을 제시하고 사람과 자원을 움직이는 지도력이 필요한 상황이다.", "caution": "큰 그림이 실행 세부와 타인의 의견을 지우지 않게 해야 한다." },
+      "reversed": { "keywords": ["독선", "과욕", "성급한 지휘"], "summary": "개인의 확신이 과도해 계획을 밀어붙이거나 책임을 아래로 넘길 수 있다.", "caution": "권한과 책임이 같은 위치에 있는지 확인해야 한다." },
+      "contexts": { "relationship": "관계 방향을 정하는 주도권", "work": "비전과 실행 책임", "decision": "장기 확장성", "self": "영향력 사용 방식" }
+    },
+
+    {
+      "id": "cups-ace", "nameKo": "컵 에이스", "nameEn": "Ace of Cups", "arcana": "minor", "suit": "cups", "rank": "ace",
+      "upright": { "keywords": ["감정 시작", "수용", "연결"], "summary": "새로운 감정적 가능성이나 관계를 받아들일 여지가 생긴다.", "caution": "초기의 풍부한 감정을 장기 약속으로 앞당겨 해석하지 말아야 한다." },
+      "reversed": { "keywords": ["감정 억제", "고갈", "닫힘"], "summary": "감정을 표현하기 어렵거나 받아들일 여유가 부족한 상태다.", "caution": "상대의 반응보다 자신의 정서적 수용 능력을 먼저 확인해야 한다." },
+      "contexts": { "relationship": "호감과 정서적 개방", "work": "일에 대한 새 애착", "decision": "감정적 만족의 중요도", "self": "감정 회복과 자기 돌봄" }
+    },
+    {
+      "id": "cups-02", "nameKo": "컵 2", "nameEn": "Two of Cups", "arcana": "minor", "suit": "cups", "rank": "2",
+      "upright": { "keywords": ["상호성", "합의", "교감"], "summary": "두 사람이 서로의 의도와 감정을 비교적 균형 있게 주고받을 수 있다.", "caution": "좋은 감정과 실제 합의된 조건을 분리해서 확인해야 한다." },
+      "reversed": { "keywords": ["불균형", "오해", "단절"], "summary": "감정의 크기나 기대가 다르거나 소통 방식이 어긋날 수 있다.", "caution": "상호성 없는 관계를 잠재력만으로 유지하지 말아야 한다." },
+      "contexts": { "relationship": "호감·약속의 상호성", "work": "일대일 협력과 계약", "decision": "상대와 조건을 맞추는 선택", "self": "자신과 욕구의 화해" }
+    },
+    {
+      "id": "cups-03", "nameKo": "컵 3", "nameEn": "Three of Cups", "arcana": "minor", "suit": "cups", "rank": "3",
+      "upright": { "keywords": ["우정", "공유", "축하"], "summary": "주변의 지지와 함께 성과나 감정을 나누는 흐름이다.", "caution": "즐거운 분위기 때문에 개인 간 경계를 흐리지 말아야 한다." },
+      "reversed": { "keywords": ["과도한 사교", "소외", "관계 복잡화"], "summary": "집단 안의 소외감이나 과도한 교류로 피로와 오해가 생길 수 있다.", "caution": "제삼자의 영향이 핵심 관계를 흔드는지 확인해야 한다." },
+      "contexts": { "relationship": "친구·주변 관계의 영향", "work": "팀 성과와 네트워크", "decision": "주변 의견의 적정 비중", "self": "즐거움과 소속감" }
+    },
+    {
+      "id": "cups-04", "nameKo": "컵 4", "nameEn": "Four of Cups", "arcana": "minor", "suit": "cups", "rank": "4",
+      "upright": { "keywords": ["권태", "재평가", "무관심"], "summary": "제안이나 가능성이 있어도 현재 감정 상태 때문에 가치를 느끼기 어렵다.", "caution": "익숙하지 않다는 이유로 선택지를 자동으로 제외하지 말아야 한다." },
+      "reversed": { "keywords": ["관심 회복", "새 시야", "움직임"], "summary": "정체에서 벗어나 이전에 보지 못한 가능성을 다시 살필 수 있다.", "caution": "무료함을 피하기 위한 성급한 선택은 주의해야 한다." },
+      "contexts": { "relationship": "감정적 거리와 권태", "work": "동기 저하와 새로운 제안", "decision": "놓치고 있는 선택지", "self": "무감각과 회복 신호" }
+    },
+    {
+      "id": "cups-05", "nameKo": "컵 5", "nameEn": "Five of Cups", "arcana": "minor", "suit": "cups", "rank": "5",
+      "upright": { "keywords": ["상실", "후회", "슬픔"], "summary": "잃은 부분에 시선이 집중되어 남아 있는 자원과 관계를 보기 어렵다.", "caution": "슬픔을 서둘러 해결하려 하지 말되 전체 가능성을 닫지도 말아야 한다." },
+      "reversed": { "keywords": ["수용", "회복", "과거 정리"], "summary": "상실을 인정하고 남은 가능성으로 천천히 시선을 옮기는 흐름이다.", "caution": "회복을 위해 있었던 문제를 없는 일로 만들지 말아야 한다." },
+      "contexts": { "relationship": "실망과 남은 신뢰", "work": "실패 이후 복구", "decision": "매몰 비용과 남은 자원", "self": "후회 처리 방식" }
+    },
+    {
+      "id": "cups-06", "nameKo": "컵 6", "nameEn": "Six of Cups", "arcana": "minor", "suit": "cups", "rank": "6",
+      "upright": { "keywords": ["기억", "친숙함", "과거 연결"], "summary": "과거의 관계나 경험이 현재에 안정감과 단서를 제공한다.", "caution": "좋았던 기억이 당시의 문제까지 지우지 않게 해야 한다." },
+      "reversed": { "keywords": ["과거 집착", "미성숙", "기억 왜곡"], "summary": "익숙한 과거에 머물거나 현재 상황을 옛 기준으로 판단할 수 있다.", "caution": "지금의 사람과 상황이 과거와 같은지 검증해야 한다." },
+      "contexts": { "relationship": "재회와 오래된 유대", "work": "과거 경험의 재사용", "decision": "익숙함과 현재 적합성 비교", "self": "어린 시절 패턴" }
+    },
+    {
+      "id": "cups-07", "nameKo": "컵 7", "nameEn": "Seven of Cups", "arcana": "minor", "suit": "cups", "rank": "7",
+      "upright": { "keywords": ["선택지", "환상", "분산"], "summary": "가능성은 많지만 현실성, 비용과 우선순위가 정리되지 않았다.", "caution": "매력적인 이미지와 실행 가능한 계획을 분리해야 한다." },
+      "reversed": { "keywords": ["현실화", "선택 집중", "혼란 정리"], "summary": "과도한 선택지를 줄이고 실제 가능한 한 방향에 집중할 수 있다.", "caution": "조급함 때문에 충분한 비교 없이 하나를 고르지 말아야 한다." },
+      "contexts": { "relationship": "상대에 대한 이상화", "work": "아이디어 과다와 우선순위", "decision": "선택지의 현실성 검증", "self": "욕구와 환상의 구분" }
+    },
+    {
+      "id": "cups-08", "nameKo": "컵 8", "nameEn": "Eight of Cups", "arcana": "minor", "suit": "cups", "rank": "8",
+      "upright": { "keywords": ["떠남", "재탐색", "정서적 전환"], "summary": "겉으로 충분해 보여도 더는 의미를 주지 않는 상태에서 벗어날 필요가 있다.", "caution": "떠나는 이유와 다음에 찾을 기준을 함께 정리해야 한다." },
+      "reversed": { "keywords": ["미련", "회피성 이동", "돌아감"], "summary": "떠나야 하는지 확신하지 못하거나 문제를 해결하지 않은 채 이동할 수 있다.", "caution": "환경 변화가 내부 문제를 자동으로 해결할 것이라 기대하지 말아야 한다." },
+      "contexts": { "relationship": "정서적 이탈과 종료", "work": "의미를 잃은 역할에서 이동", "decision": "유지와 떠남의 비용", "self": "충족되지 않는 욕구" }
+    },
+    {
+      "id": "cups-09", "nameKo": "컵 9", "nameEn": "Nine of Cups", "arcana": "minor", "suit": "cups", "rank": "9",
+      "upright": { "keywords": ["만족", "소원 성취", "여유"], "summary": "원하던 결과를 체감하고 현재의 만족을 누릴 수 있는 흐름이다.", "caution": "개인적 만족이 주변과의 균형을 해치지 않는지 확인해야 한다." },
+      "reversed": { "keywords": ["과잉", "공허", "기대 불일치"], "summary": "원한 것을 얻어도 기대만큼 충족되지 않거나 소비로 공허함을 채울 수 있다.", "caution": "원하는 대상보다 그 뒤의 필요를 살펴야 한다." },
+      "contexts": { "relationship": "정서적 만족과 자기중심성", "work": "보상과 성취 체감", "decision": "원하는 결과의 실제 가치", "self": "충족감의 근원" }
+    },
+    {
+      "id": "cups-10", "nameKo": "컵 10", "nameEn": "Ten of Cups", "arcana": "minor", "suit": "cups", "rank": "10",
+      "upright": { "keywords": ["정서적 안정", "공동체", "조화"], "summary": "개인적 만족을 넘어 가까운 사람들과 안정과 소속감을 공유할 수 있다.", "caution": "이상적인 가족·관계 이미지를 실제 합의보다 앞세우지 말아야 한다." },
+      "reversed": { "keywords": ["가치 충돌", "가정 불화", "겉보기 조화"], "summary": "겉으로는 평온해도 가까운 관계 안의 기대와 가치가 어긋날 수 있다.", "caution": "문제를 숨겨 평화로운 모습만 유지하지 말아야 한다." },
+      "contexts": { "relationship": "장기 안정과 공동 가치", "work": "팀 문화와 소속감", "decision": "주변 관계에 미치는 장기 영향", "self": "행복에 대한 기준" }
+    },
+    {
+      "id": "cups-page", "nameKo": "컵 시종", "nameEn": "Page of Cups", "arcana": "minor", "suit": "cups", "rank": "page",
+      "upright": { "keywords": ["감정 표현", "호기심", "뜻밖의 소식"], "summary": "서툴지만 진솔한 감정 표현이나 예상하지 못한 정서적 제안이 생길 수 있다.", "caution": "순수한 의도와 책임질 수 있는 행동은 별개다." },
+      "reversed": { "keywords": ["감정 미숙", "회피", "과민"], "summary": "감정을 직접 다루지 못하고 암시, 삐침 또는 상상으로 표현할 수 있다.", "caution": "상대가 알아서 이해하리라 기대하지 말아야 한다." },
+      "contexts": { "relationship": "서툰 고백과 감정 신호", "work": "창의적 제안과 피드백 민감성", "decision": "감정의 초기 신호", "self": "감정 언어 학습" }
+    },
+    {
+      "id": "cups-knight", "nameKo": "컵 기사", "nameEn": "Knight of Cups", "arcana": "minor", "suit": "cups", "rank": "knight",
+      "upright": { "keywords": ["제안", "이상", "낭만"], "summary": "감정과 이상을 바탕으로 관계나 창작에 적극적인 제안을 할 수 있다.", "caution": "아름다운 말과 실제 실행 계획을 함께 확인해야 한다." },
+      "reversed": { "keywords": ["환상", "기분 변화", "약속 불이행"], "summary": "감정은 강하지만 현실 책임이 따라오지 않거나 태도가 자주 변할 수 있다.", "caution": "가능성보다 반복된 행동을 기준으로 판단해야 한다." },
+      "contexts": { "relationship": "낭만적 접근과 약속", "work": "이상 중심의 제안", "decision": "감정적 매력의 현실성", "self": "이상과 현실의 조율" }
+    },
+    {
+      "id": "cups-queen", "nameKo": "컵 여왕", "nameEn": "Queen of Cups", "arcana": "minor", "suit": "cups", "rank": "queen",
+      "upright": { "keywords": ["공감", "수용", "정서 이해"], "summary": "감정을 섬세하게 읽고 안전하게 받아들이는 능력이 중요한 상황이다.", "caution": "공감 때문에 자신의 경계와 사실 판단을 잃지 말아야 한다." },
+      "reversed": { "keywords": ["감정 과부하", "의존", "경계 약화"], "summary": "타인의 감정을 지나치게 흡수하거나 자신의 불안을 관계에 투영할 수 있다.", "caution": "도움을 주기 전에 자신의 여유와 책임 범위를 확인해야 한다." },
+      "contexts": { "relationship": "깊은 공감과 정서 경계", "work": "돌봄 노동과 감정 관리", "decision": "감정 정보의 활용", "self": "민감성과 자기 보호" }
+    },
+    {
+      "id": "cups-king", "nameKo": "컵 왕", "nameEn": "King of Cups", "arcana": "minor", "suit": "cups", "rank": "king",
+      "upright": { "keywords": ["정서적 안정", "조정", "성숙"], "summary": "감정을 부정하지 않으면서도 상황에 맞게 표현하고 조정할 수 있다.", "caution": "침착한 태도가 감정 회피나 통제로 변하지 않게 해야 한다." },
+      "reversed": { "keywords": ["감정 조종", "억압", "불안정"], "summary": "겉으로는 차분하지만 감정을 통제 수단으로 쓰거나 내부 불안이 클 수 있다.", "caution": "말의 온화함보다 책임 있는 행동을 확인해야 한다." },
+      "contexts": { "relationship": "성숙한 감정 조율", "work": "갈등 중재와 안정", "decision": "감정과 책임의 균형", "self": "감정 표현의 통제 수준" }
+    },
+
+    {
+      "id": "swords-ace", "nameKo": "소드 에이스", "nameEn": "Ace of Swords", "arcana": "minor", "suit": "swords", "rank": "ace",
+      "upright": { "keywords": ["명료함", "결단", "사실"], "summary": "핵심 사실과 논점을 분명히 하며 결정을 시작할 수 있다.", "caution": "정확한 말이 불필요하게 공격적인 방식이 되지 않게 해야 한다." },
+      "reversed": { "keywords": ["혼란", "오판", "소통 오류"], "summary": "정보가 불완전하거나 생각이 얽혀 결론을 서두르기 어렵다.", "caution": "추측을 사실처럼 전달하지 말아야 한다." },
+      "contexts": { "relationship": "솔직한 대화와 경계", "work": "문제 정의와 계약 문구", "decision": "핵심 기준을 한 문장으로 정리", "self": "생각의 명료화" }
+    },
+    {
+      "id": "swords-02", "nameKo": "소드 2", "nameEn": "Two of Swords", "arcana": "minor", "suit": "swords", "rank": "2",
+      "upright": { "keywords": ["보류", "교착", "균형"], "summary": "두 선택의 비용이 비슷해 결정을 보류하며 균형을 유지하고 있다.", "caution": "정보를 피한 채 중립을 유지하는 것이 가능한지 확인해야 한다." },
+      "reversed": { "keywords": ["정보 과부하", "결정 압박", "회피 종료"], "summary": "더는 결정을 미루기 어렵거나 상충하는 정보가 혼란을 키울 수 있다.", "caution": "완벽한 확신을 기다리기보다 최소 기준을 세워야 한다." },
+      "contexts": { "relationship": "말하지 않은 갈등", "work": "선택 지연과 이해관계", "decision": "보류 비용 계산", "self": "불편한 사실 회피" }
+    },
+    {
+      "id": "swords-03", "nameKo": "소드 3", "nameEn": "Three of Swords", "arcana": "minor", "suit": "swords", "rank": "3",
+      "upright": { "keywords": ["상처", "분리", "불편한 사실"], "summary": "아픈 사실이나 관계의 균열을 인정해야 회복을 시작할 수 있다.", "caution": "현재의 상처를 자신의 가치 전체에 대한 평가로 만들지 말아야 한다." },
+      "reversed": { "keywords": ["회복", "억눌린 슬픔", "상처 반복"], "summary": "회복이 진행되지만 표현되지 않은 상처가 다시 반응할 수 있다.", "caution": "용서나 정리를 서두르기 전에 피해와 책임을 분명히 해야 한다." },
+      "contexts": { "relationship": "이별·배신과 회복", "work": "실망스러운 결과", "decision": "피할 수 없는 손실 인정", "self": "고통의 의미화" }
+    },
+    {
+      "id": "swords-04", "nameKo": "소드 4", "nameEn": "Four of Swords", "arcana": "minor", "suit": "swords", "rank": "4",
+      "upright": { "keywords": ["휴식", "보류", "회복"], "summary": "추가 판단이나 행동 전에 자극을 줄이고 회복할 시간이 필요하다.", "caution": "휴식 기간과 다시 움직일 조건을 함께 정해야 한다." },
+      "reversed": { "keywords": ["회복 부족", "불안", "강제 정지"], "summary": "쉬어도 생각이 멈추지 않거나 무리한 복귀로 회복이 지연될 수 있다.", "caution": "쉬었다는 시간보다 실제 에너지 상태를 기준으로 봐야 한다." },
+      "contexts": { "relationship": "대화 중단과 냉각 기간", "work": "번아웃 예방과 휴식", "decision": "판단을 늦출 필요", "self": "신경계 회복" }
+    },
+    {
+      "id": "swords-05", "nameKo": "소드 5", "nameEn": "Five of Swords", "arcana": "minor", "suit": "swords", "rank": "5",
+      "upright": { "keywords": ["갈등", "승패 집착", "손상"], "summary": "이기더라도 관계나 신뢰에 남는 비용이 큰 갈등일 수 있다.", "caution": "옳음을 증명하는 것과 원하는 결과를 얻는 것을 구분해야 한다." },
+      "reversed": { "keywords": ["화해 시도", "잔여 감정", "갈등 회피"], "summary": "갈등을 끝내려 하지만 책임과 상처가 충분히 정리되지 않았을 수 있다.", "caution": "표면적 사과만으로 같은 구조가 반복되지 않게 해야 한다." },
+      "contexts": { "relationship": "상처를 남기는 말싸움", "work": "정치적 갈등과 승자 비용", "decision": "승리의 실제 대가", "self": "방어적 사고 패턴" }
+    },
+    {
+      "id": "swords-06", "nameKo": "소드 6", "nameEn": "Six of Swords", "arcana": "minor", "suit": "swords", "rank": "6",
+      "upright": { "keywords": ["이동", "전환", "회복 과정"], "summary": "완전히 해결되지는 않았지만 더 안정적인 환경으로 옮겨 갈 수 있다.", "caution": "이동 후에도 남은 문제를 다룰 계획이 필요하다." },
+      "reversed": { "keywords": ["이동 지연", "미해결 문제", "되돌아감"], "summary": "과거 문제나 현실 조건 때문에 전환이 매끄럽지 않을 수 있다.", "caution": "환경만 바꾸면 해결될 문제인지 점검해야 한다." },
+      "contexts": { "relationship": "갈등 뒤 거리 조정", "work": "이직·이동과 전환기", "decision": "덜 해로운 방향으로 이동", "self": "생각의 회복 과정" }
+    },
+    {
+      "id": "swords-07", "nameKo": "소드 7", "nameEn": "Seven of Swords", "arcana": "minor", "suit": "swords", "rank": "7",
+      "upright": { "keywords": ["전략", "회피", "비공개 행동"], "summary": "모든 정보를 공개하지 않은 전략이나 책임 회피가 상황에 포함돼 있을 수 있다.", "caution": "영리한 우회가 신뢰 훼손과 장기 비용을 만들지 확인해야 한다." },
+      "reversed": { "keywords": ["폭로", "자기기만", "정면 대응"], "summary": "숨겨진 행동이 드러나거나 더는 우회하기 어려워 직접 설명해야 한다.", "caution": "고백 자체보다 이후 책임과 수정 행동을 봐야 한다." },
+      "contexts": { "relationship": "숨김과 신뢰 문제", "work": "비공식 전략과 책임 소재", "decision": "정보 공개 범위의 윤리", "self": "자기 합리화" }
+    },
+    {
+      "id": "swords-08", "nameKo": "소드 8", "nameEn": "Eight of Swords", "arcana": "minor", "suit": "swords", "rank": "8",
+      "upright": { "keywords": ["제약", "무력감", "사고의 틀"], "summary": "선택지가 없다고 느끼지만 일부 제약은 두려움이나 고정된 해석에서 생긴다.", "caution": "실제 위험과 예상되는 부정적 결과를 분리해야 한다." },
+      "reversed": { "keywords": ["해방", "관점 변화", "두려움 완화"], "summary": "제약의 구조를 이해하며 작은 선택권부터 되찾을 수 있다.", "caution": "제약이 모두 사라졌다고 과신하지 말고 안전하게 범위를 넓혀야 한다." },
+      "contexts": { "relationship": "말하기 어려운 관계 구조", "work": "권한 부족과 자기 제한", "decision": "실제 선택 가능한 범위", "self": "불안이 만든 금지선" }
+    },
+    {
+      "id": "swords-09", "nameKo": "소드 9", "nameEn": "Nine of Swords", "arcana": "minor", "suit": "swords", "rank": "9",
+      "upright": { "keywords": ["불안", "죄책감", "반복 사고"], "summary": "문제 자체와 별개로 최악의 가능성을 반복해 생각하며 부담이 커진 상태다.", "caution": "혼자 판단을 확정하기보다 사실과 지원 자원을 확인해야 한다." },
+      "reversed": { "keywords": ["불안 완화", "도움 요청", "내면화"], "summary": "불안을 다루기 시작하거나 반대로 겉으로 숨긴 채 내부에서 더 키울 수 있다.", "caution": "기능을 방해할 정도의 불안은 전문적인 도움을 고려해야 한다." },
+      "contexts": { "relationship": "걱정과 죄책감의 투영", "work": "실수 공포와 과도한 압박", "decision": "최악의 가정 검증", "self": "반복 사고 관리" }
+    },
+    {
+      "id": "swords-10", "nameKo": "소드 10", "nameEn": "Ten of Swords", "arcana": "minor", "suit": "swords", "rank": "10",
+      "upright": { "keywords": ["끝", "한계", "결정적 종료"], "summary": "기존 방식이 더는 지속될 수 없는 지점에 도달해 종료를 인정해야 한다.", "caution": "최악의 순간을 미래 전체의 상태로 확대하지 말아야 한다." },
+      "reversed": { "keywords": ["회복 시작", "종료 지연", "잔여 충격"], "summary": "바닥을 지나 회복할 여지가 생기지만 끝내지 못한 문제가 남아 있을 수 있다.", "caution": "빠른 정상화보다 재발을 막는 정리가 우선이다." },
+      "contexts": { "relationship": "결정적 단절과 이후 회복", "work": "프로젝트·역할의 종료", "decision": "더 이상의 손실 중단", "self": "절망 뒤 현실적 회복" }
+    },
+    {
+      "id": "swords-page", "nameKo": "소드 시종", "nameEn": "Page of Swords", "arcana": "minor", "suit": "swords", "rank": "page",
+      "upright": { "keywords": ["질문", "정보", "관찰"], "summary": "새 정보를 빠르게 수집하고 질문하며 논리를 시험하는 단계다.", "caution": "확인되지 않은 정보를 성급하게 공유하지 말아야 한다." },
+      "reversed": { "keywords": ["소문", "방어적 말", "피상적 조사"], "summary": "정보를 충분히 이해하지 못한 채 판단하거나 말이 갈등을 키울 수 있다.", "caution": "감시와 확인, 비판과 공격을 구분해야 한다." },
+      "contexts": { "relationship": "예민한 대화와 관찰", "work": "조사·학습과 커뮤니케이션", "decision": "추가 질문이 필요한 단계", "self": "생각과 말의 속도" }
+    },
+    {
+      "id": "swords-knight", "nameKo": "소드 기사", "nameEn": "Knight of Swords", "arcana": "minor", "suit": "swords", "rank": "knight",
+      "upright": { "keywords": ["직진", "논쟁", "신속한 판단"], "summary": "목표나 논리를 분명히 하고 빠르게 문제를 돌파하려는 힘이 있다.", "caution": "속도와 확신 때문에 맥락과 감정을 놓치지 말아야 한다." },
+      "reversed": { "keywords": ["성급함", "공격성", "무계획"], "summary": "검토 없이 결론을 밀어붙이거나 말이 행동보다 앞설 수 있다.", "caution": "긴급함이 실제인지 스스로 만든 압박인지 확인해야 한다." },
+      "contexts": { "relationship": "직설적 대화와 충돌", "work": "빠른 실행과 논리 중심 대응", "decision": "속도보다 정보 완결성", "self": "분노와 확신의 구분" }
+    },
+    {
+      "id": "swords-queen", "nameKo": "소드 여왕", "nameEn": "Queen of Swords", "arcana": "minor", "suit": "swords", "rank": "queen",
+      "upright": { "keywords": ["분별", "독립", "정직"], "summary": "감정에 휩쓸리지 않고 사실과 경계를 분명하게 말할 수 있다.", "caution": "정확성을 이유로 불필요하게 차갑거나 단정적이지 않게 해야 한다." },
+      "reversed": { "keywords": ["냉소", "가혹함", "편견"], "summary": "상처나 불신이 판단을 날카롭게 만들어 타인의 의도를 부정적으로 고정할 수 있다.", "caution": "경계 설정과 관계 단절을 같은 것으로 다루지 말아야 한다." },
+      "contexts": { "relationship": "명확한 경계와 현실적 대화", "work": "분석과 공정한 평가", "decision": "감정과 증거 분리", "self": "자기 보호와 냉소" }
+    },
+    {
+      "id": "swords-king", "nameKo": "소드 왕", "nameEn": "King of Swords", "arcana": "minor", "suit": "swords", "rank": "king",
+      "upright": { "keywords": ["논리", "원칙", "판단"], "summary": "일관된 기준과 충분한 근거를 바탕으로 책임 있는 결정을 내려야 한다.", "caution": "원칙이 개별 상황의 맥락을 완전히 지우지 않게 해야 한다." },
+      "reversed": { "keywords": ["권위적 판단", "조작", "경직"], "summary": "논리나 정보를 권력처럼 사용해 결론을 통제할 수 있다.", "caution": "전문성의 외형보다 근거 공개와 책임 구조를 확인해야 한다." },
+      "contexts": { "relationship": "감정보다 규칙을 앞세우는 태도", "work": "전문 판단과 정책", "decision": "객관 기준과 책임", "self": "사고의 경직성" }
+    },
+
+    {
+      "id": "pentacles-ace", "nameKo": "펜타클 에이스", "nameEn": "Ace of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "ace",
+      "upright": { "keywords": ["현실적 기회", "기반", "자원"], "summary": "돈, 일, 건강 또는 생활 기반과 관련된 구체적인 시작점이 생긴다.", "caution": "기회가 결과가 되려면 관리 계획과 시간이 필요하다." },
+      "reversed": { "keywords": ["기회 지연", "계획 부족", "자원 손실"], "summary": "좋은 가능성이 있어도 준비나 자원 관리가 부족해 놓칠 수 있다.", "caution": "초기 비용과 유지 비용을 함께 계산해야 한다." },
+      "contexts": { "relationship": "현실적인 안정 기반", "work": "새 수입·직무 기회", "decision": "구체적 이익과 비용", "self": "생활 기반 정비" }
+    },
+    {
+      "id": "pentacles-02", "nameKo": "펜타클 2", "nameEn": "Two of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "2",
+      "upright": { "keywords": ["조정", "유연성", "다중 과제"], "summary": "여러 책임을 오가며 우선순위와 자원을 탄력적으로 조정해야 한다.", "caution": "계속 버티는 방식이 장기적으로 가능한지 확인해야 한다." },
+      "reversed": { "keywords": ["과부하", "혼선", "우선순위 상실"], "summary": "처리할 일이 많아 중요한 기준과 일정이 흔들릴 수 있다.", "caution": "모든 일을 유지하려 하지 말고 줄일 항목을 정해야 한다." },
+      "contexts": { "relationship": "시간·관심 배분", "work": "업무와 재정의 동시 관리", "decision": "우선순위와 가변성", "self": "일상 균형" }
+    },
+    {
+      "id": "pentacles-03", "nameKo": "펜타클 3", "nameEn": "Three of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "3",
+      "upright": { "keywords": ["협업", "기술", "피드백"], "summary": "서로 다른 기술과 역할을 조합하면 결과의 완성도를 높일 수 있다.", "caution": "역할과 평가 기준을 초기에 명확히 해야 한다." },
+      "reversed": { "keywords": ["협업 실패", "기준 불일치", "미숙"], "summary": "역할이 겹치거나 품질 기준이 달라 공동 작업의 효율이 떨어질 수 있다.", "caution": "개인의 능력보다 협업 구조를 먼저 점검해야 한다." },
+      "contexts": { "relationship": "함께 만드는 현실적 기반", "work": "팀워크와 전문성", "decision": "혼자 할지 협력할지", "self": "피드백을 통한 숙련" }
+    },
+    {
+      "id": "pentacles-04", "nameKo": "펜타클 4", "nameEn": "Four of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "4",
+      "upright": { "keywords": ["보존", "통제", "안전"], "summary": "자원을 지키고 손실을 제한하려는 태도가 강한 상황이다.", "caution": "안전을 위해 지나치게 닫히면 성장과 교환의 기회도 줄어든다." },
+      "reversed": { "keywords": ["집착 완화", "낭비", "통제 불안"], "summary": "붙잡던 것을 놓기 시작하거나 반대로 자원 관리가 느슨해질 수 있다.", "caution": "개방과 무계획한 소비를 구분해야 한다." },
+      "contexts": { "relationship": "소유욕과 경계", "work": "예산·권한 통제", "decision": "안전 비용과 기회 비용", "self": "부족함에 대한 두려움" }
+    },
+    {
+      "id": "pentacles-05", "nameKo": "펜타클 5", "nameEn": "Five of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "5",
+      "upright": { "keywords": ["부족", "소외", "지원 필요"], "summary": "자원이나 안정감이 부족해 혼자 감당한다고 느끼기 쉬운 시기다.", "caution": "도움을 받을 수 있는 통로까지 없다고 단정하지 말아야 한다." },
+      "reversed": { "keywords": ["회복", "지원 발견", "재정비"], "summary": "지원과 해결 경로를 찾으며 어려움에서 점차 벗어날 수 있다.", "caution": "단기 회복 뒤의 구조적 원인도 함께 다뤄야 한다." },
+      "contexts": { "relationship": "어려움 속 지지 여부", "work": "재정·고용 불안", "decision": "지원 자원 확인", "self": "도움 요청의 어려움" }
+    },
+    {
+      "id": "pentacles-06", "nameKo": "펜타클 6", "nameEn": "Six of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "6",
+      "upright": { "keywords": ["지원", "교환", "균형"], "summary": "자원과 도움을 주고받되 권한과 조건을 분명히 해야 하는 상황이다.", "caution": "도움이 의존이나 통제 수단이 되지 않는지 확인해야 한다." },
+      "reversed": { "keywords": ["불공정", "조건부 지원", "부채감"], "summary": "주고받는 양과 권력이 불균형하거나 숨은 대가가 있을 수 있다.", "caution": "호의의 조건과 상환 기대를 명확히 해야 한다." },
+      "contexts": { "relationship": "돌봄과 권력의 균형", "work": "보상·지원 배분", "decision": "도움을 받는 조건", "self": "주고받기에 대한 태도" }
+    },
+    {
+      "id": "pentacles-07", "nameKo": "펜타클 7", "nameEn": "Seven of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "7",
+      "upright": { "keywords": ["평가", "인내", "장기 투자"], "summary": "투입한 시간과 자원이 기대한 방향으로 가는지 중간 평가할 시점이다.", "caution": "기다린 시간이 길다는 이유만으로 계속 투자하지 말아야 한다." },
+      "reversed": { "keywords": ["성과 부족", "조급함", "잘못된 투자"], "summary": "노력 대비 결과가 적거나 평가 없이 같은 방식을 반복할 수 있다.", "caution": "포기 전 전략 수정 가능성과 추가 비용을 비교해야 한다." },
+      "contexts": { "relationship": "관계에 들인 노력의 평가", "work": "장기 성과와 투자 회수", "decision": "계속할지 수정할지", "self": "인내와 매몰 비용" }
+    },
+    {
+      "id": "pentacles-08", "nameKo": "펜타클 8", "nameEn": "Eight of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "8",
+      "upright": { "keywords": ["숙련", "반복", "품질"], "summary": "기초를 반복하고 세부를 개선하는 꾸준한 작업이 결과를 만든다.", "caution": "완벽주의 때문에 전체 목적과 마감이 밀리지 않게 해야 한다." },
+      "reversed": { "keywords": ["대충함", "매너리즘", "완벽주의"], "summary": "반복이 성장으로 이어지지 않거나 품질 집착으로 효율이 떨어질 수 있다.", "caution": "연습 방식과 피드백 구조를 바꿀 필요가 있다." },
+      "contexts": { "relationship": "관계를 위한 꾸준한 행동", "work": "기술 훈련과 전문성", "decision": "학습 비용과 숙련 가치", "self": "습관을 통한 성장" }
+    },
+    {
+      "id": "pentacles-09", "nameKo": "펜타클 9", "nameEn": "Nine of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "9",
+      "upright": { "keywords": ["자립", "성과", "여유"], "summary": "스스로 만든 기반과 성과를 안정적으로 누릴 수 있는 단계다.", "caution": "독립성이 관계와 도움을 거부하는 태도가 되지 않게 해야 한다." },
+      "reversed": { "keywords": ["의존", "과시 소비", "불안정한 기반"], "summary": "겉보기 성과와 실제 자립 수준이 다르거나 유지 비용이 클 수 있다.", "caution": "이미지보다 현금 흐름과 생활 안정성을 확인해야 한다." },
+      "contexts": { "relationship": "독립성을 유지하는 관계", "work": "개인 성과와 경제적 자립", "decision": "혼자 감당 가능한 범위", "self": "성과를 누리는 능력" }
+    },
+    {
+      "id": "pentacles-10", "nameKo": "펜타클 10", "nameEn": "Ten of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "10",
+      "upright": { "keywords": ["장기 안정", "유산", "구조"], "summary": "개인을 넘어 가족, 조직 또는 장기 시스템에 남는 안정 기반을 만들 수 있다.", "caution": "안정된 구조가 변화와 개인 선택을 지나치게 제한하지 않게 해야 한다." },
+      "reversed": { "keywords": ["기반 흔들림", "가족 갈등", "단기주의"], "summary": "재정이나 공동 기반의 규칙이 어긋나 장기 안정이 흔들릴 수 있다.", "caution": "겉으로 유지되는 전통보다 실제 부담과 권한을 확인해야 한다." },
+      "contexts": { "relationship": "장기 생활 기반과 가족", "work": "조직 안정과 자산", "decision": "세대·장기 영향", "self": "안정에 대한 가치관" }
+    },
+    {
+      "id": "pentacles-page", "nameKo": "펜타클 시종", "nameEn": "Page of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "page",
+      "upright": { "keywords": ["학습", "실용 계획", "작은 기회"], "summary": "현실적인 목표를 세우고 기초부터 배우기 좋은 단계다.", "caution": "준비만 오래 하며 실제 경험을 미루지 말아야 한다." },
+      "reversed": { "keywords": ["계획 미흡", "학습 지연", "집중 부족"], "summary": "목표는 있으나 꾸준한 학습과 실행 구조가 부족할 수 있다.", "caution": "큰 성과보다 반복 가능한 일정부터 만들어야 한다." },
+      "contexts": { "relationship": "천천히 쌓는 신뢰", "work": "자격·기술 학습", "decision": "기초 비용과 학습 가능성", "self": "현실적인 성장 계획" }
+    },
+    {
+      "id": "pentacles-knight", "nameKo": "펜타클 기사", "nameEn": "Knight of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "knight",
+      "upright": { "keywords": ["꾸준함", "책임", "절차"], "summary": "느리더라도 계획과 책임을 지키는 방식이 가장 안정적인 결과를 만든다.", "caution": "안정성 때문에 필요한 변화까지 거부하지 말아야 한다." },
+      "reversed": { "keywords": ["정체", "무기력", "융통성 부족"], "summary": "반복은 계속되지만 목적과 성과가 흐려지거나 지나치게 경직될 수 있다.", "caution": "성실함과 비효율적인 관성을 구분해야 한다." },
+      "contexts": { "relationship": "일관된 행동과 안정", "work": "신뢰도 높은 실행", "decision": "느리지만 확실한 경로", "self": "루틴과 변화의 균형" }
+    },
+    {
+      "id": "pentacles-queen", "nameKo": "펜타클 여왕", "nameEn": "Queen of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "queen",
+      "upright": { "keywords": ["실용적 돌봄", "안정", "관리"], "summary": "생활과 자원을 세심하게 관리하며 자신과 주변을 안정시킬 수 있다.", "caution": "돌봄과 실무가 한 사람에게만 몰리지 않게 해야 한다." },
+      "reversed": { "keywords": ["자기 소홀", "과부담", "불안"], "summary": "타인의 필요나 현실 업무를 챙기느라 자신의 안정이 약해질 수 있다.", "caution": "유능함 때문에 도움 요청을 미루지 말아야 한다." },
+      "contexts": { "relationship": "현실적인 돌봄과 생활 공유", "work": "자원·일정 관리", "decision": "지속 가능한 생활 조건", "self": "자기 돌봄과 재정 안정" }
+    },
+    {
+      "id": "pentacles-king", "nameKo": "펜타클 왕", "nameEn": "King of Pentacles", "arcana": "minor", "suit": "pentacles", "rank": "king",
+      "upright": { "keywords": ["안정적 성취", "관리", "책임"], "summary": "장기 자원과 현실적 성과를 안정적으로 운영할 능력이나 구조가 있다.", "caution": "성과와 자산이 유일한 가치 기준이 되지 않게 해야 한다." },
+      "reversed": { "keywords": ["탐욕", "경직된 물질주의", "관리 실패"], "summary": "안정에 대한 집착이 통제나 과도한 이익 추구로 변할 수 있다.", "caution": "단기 수익과 장기 신뢰의 손익을 함께 계산해야 한다." },
+      "contexts": { "relationship": "안정 제공과 통제의 경계", "work": "재정·조직 운영", "decision": "장기 수익성과 책임", "self": "성공을 정의하는 기준" }
+    }
+  ]
+}
