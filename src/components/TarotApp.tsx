@@ -9,7 +9,6 @@ import {
   Download,
   History,
   LoaderCircle,
-  Printer,
   RefreshCw,
   RotateCcw,
   Save,
@@ -18,11 +17,12 @@ import {
   Shuffle,
   X,
 } from "lucide-react";
-import { toPng } from "html-to-image";
+import { toBlob } from "html-to-image";
 import Image from "next/image";
 import {
   type FormEvent,
   type ReactNode,
+  type RefObject,
   useCallback,
   useEffect,
   useMemo,
@@ -90,6 +90,11 @@ interface RestorableState {
   round: number;
   recordId: string;
   apiMode: ApiMode;
+}
+
+interface AppNotice {
+  id: number;
+  message: string;
 }
 
 const SESSION_KEY = "tarot-milktea-current-reading";
@@ -165,7 +170,54 @@ function userError(error: unknown, language: AppLanguage = "ko"): string {
   return english ? "The request could not be processed. Try again." : "요청을 처리하지 못했습니다. 다시 시도하세요.";
 }
 
-function CardImage({ cardId, reversed, language = "ko", alt }: { cardId: string; reversed: boolean; language?: AppLanguage; alt?: string }) {
+async function writeClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Some embedded browsers expose Clipboard API but deny it. Use the
+      // selection-based fallback before reporting a failure.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("Clipboard copy failed");
+}
+
+async function waitForExportImages(container: HTMLElement): Promise<void> {
+  const images = Array.from(container.querySelectorAll("img"));
+  await Promise.all(images.map(async (image) => {
+    if (!image.complete) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => reject(new Error("Image load timed out")), 8000);
+        const finish = (callback: () => void) => {
+          window.clearTimeout(timer);
+          image.removeEventListener("load", loaded);
+          image.removeEventListener("error", failed);
+          callback();
+        };
+        const loaded = () => finish(resolve);
+        const failed = () => finish(() => reject(new Error("Image load failed")));
+        image.addEventListener("load", loaded, { once: true });
+        image.addEventListener("error", failed, { once: true });
+      });
+    }
+    if (!image.naturalWidth) throw new Error("Image has no drawable content");
+    if (image.decode) await image.decode();
+  }));
+}
+
+function CardImage({ cardId, reversed, language = "ko", alt, eager = false }: { cardId: string; reversed: boolean; language?: AppLanguage; alt?: string; eager?: boolean }) {
   const card = getCard(cardId);
   return (
     <Image
@@ -174,6 +226,7 @@ function CardImage({ cardId, reversed, language = "ko", alt }: { cardId: string;
       alt={alt ?? `${language === "ko" ? card.nameKo : card.nameEn} ${orientationLabel(reversed, language)}`}
       width={512}
       height={768}
+      loading={eager ? "eager" : undefined}
       unoptimized
     />
   );
@@ -215,6 +268,106 @@ function GameDialog({
   );
 }
 
+function ReadingExport({
+  nodeRef,
+  nickname,
+  question,
+  result,
+  cards,
+  language,
+}: {
+  nodeRef: RefObject<HTMLElement | null>;
+  nickname: string;
+  question: string;
+  result: ReadingResult;
+  cards: SelectedCard[];
+  language: AppLanguage;
+}) {
+  const t = UI_TEXT[language];
+  const signalLabels = language === "ko"
+    ? { support: "지지", caution: "주의", uncertainty: "불확실" }
+    : { support: "Support", caution: "Caution", uncertainty: "Uncertainty" };
+
+  return (
+    <article className="reading-export" ref={nodeRef} aria-hidden="true">
+      <header className="reading-export-header">
+        <div>
+          <p>TAROT MILKTEA WEB / AI READING</p>
+          <h1>{question}</h1>
+        </div>
+        {nickname ? <span>{nickname}</span> : null}
+      </header>
+
+      <section className="reading-export-summary">
+        <p className="reading-export-kicker">CORE RESULT</p>
+        <h2>{result.summary}</h2>
+        <p>{result.synthesis}</p>
+      </section>
+
+      <section className="reading-export-guidance">
+        <h2>{t.checkPoints}</h2>
+        <ol>{result.guidance.map((item) => <li key={item}>{item}</li>)}</ol>
+      </section>
+
+      <section className="reading-export-cards">
+        <h2>{t.cardReading}</h2>
+        {result.cardInterpretations.map((interpretation, index) => {
+          const card = getCard(interpretation.cardId);
+          const selected = cards.find((candidate) => candidate.cardId === interpretation.cardId);
+          const reversed = interpretation.orientation === "reversed";
+          return (
+            <article className="reading-export-card" key={`${interpretation.cardId}-${index}`}>
+              <div className="reading-export-card-image">
+                <CardImage cardId={card.id} reversed={reversed} language={language} eager />
+              </div>
+              <div className="reading-export-card-copy">
+                <p className="reading-export-position">{index + 1}. {interpretation.positionTitle}</p>
+                <h3>{language === "ko" ? card.nameKo : card.nameEn}<span>{orientationLabel(reversed, language)}</span></h3>
+                {selected?.positionFocus ? <p className="reading-export-focus">{selected.positionFocus}</p> : null}
+                <section>
+                  <h4>{t.cardConclusion}</h4>
+                  <p>{interpretation.text}</p>
+                </section>
+                {interpretation.reasoning ? (
+                  <dl>
+                    <div><dt>{t.sourceMeaning}</dt><dd>{interpretation.reasoning.sourceMeaning}</dd></div>
+                    <div><dt>{t.questionConnection}</dt><dd>{interpretation.reasoning.questionConnection}</dd></div>
+                    <div><dt>{t.decisionImpact}</dt><dd>{interpretation.reasoning.decisionImpact}</dd></div>
+                  </dl>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+      </section>
+
+      <section className="reading-export-metrics">
+        <div>
+          <h2>{t.signalDistribution}</h2>
+          <dl className="reading-export-signals">
+            {(Object.keys(signalLabels) as Array<keyof typeof signalLabels>).map((key) => (
+              <div key={key}><dt>{signalLabels[key]}</dt><dd>{result.signals[key]}%</dd></div>
+            ))}
+          </dl>
+        </div>
+        <div>
+          <h2>{t.questionMetrics}</h2>
+          <dl className="reading-export-axes">
+            {result.axes.map((axis) => (
+              <div key={axis.label}>
+                <dt>{axis.label}<b>{axis.score}</b></dt>
+                <dd>{axis.evidence}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </section>
+
+      <footer className="reading-export-footer">{result.limitation}</footer>
+    </article>
+  );
+}
+
 function progressFor(phase: Phase): number {
   if (phase === "home" || phase === "question") return 0;
   if (phase === "planning" || phase === "plan") return 1;
@@ -249,7 +402,8 @@ export function TarotApp() {
   const [apiMode, setApiMode] = useState<ApiMode>("local");
   const [turnstileToken, setTurnstileToken] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<AppNotice | null>(null);
+  const [imageExporting, setImageExporting] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [language, setLanguage] = useState<AppLanguage>("ko");
@@ -261,7 +415,15 @@ export function TarotApp() {
   const [activeCardIndex, setActiveCardIndex] = useState(0);
   const [restored, setRestored] = useState(false);
   const resultRef = useRef<HTMLElement>(null);
+  const exportRef = useRef<HTMLElement>(null);
+  const questionInputRef = useRef<HTMLTextAreaElement>(null);
+  const noticeIdRef = useRef(0);
   const t = UI_TEXT[language];
+
+  const showNotice = useCallback((message: string) => {
+    noticeIdRef.current += 1;
+    setNotice({ id: noticeIdRef.current, message });
+  }, []);
 
   const handleTurnstileToken = useCallback((token: string) => setTurnstileToken(token), []);
   const handleSessionRefreshToken = useCallback(async (token: string) => {
@@ -269,11 +431,11 @@ export function TarotApp() {
       await ensureAnonymousSession(token);
       setSessionRefreshNeeded(false);
       setError("");
-      setNotice(language === "ko" ? "세션을 다시 만들었습니다. 중단된 요청을 다시 실행하세요." : "The session was renewed. Retry the interrupted request.");
+      showNotice(language === "ko" ? "세션을 다시 만들었습니다. 중단된 요청을 다시 실행하세요." : "The session was renewed. Retry the interrupted request.");
     } catch (refreshError) {
       setError(userError(refreshError, language));
     }
-  }, [language]);
+  }, [language, showNotice]);
 
   const usedCardIds = useMemo(() => new Set(cards.map((card) => card.cardId)), [cards]);
   const availableDeck = useMemo(() => deck.filter((item) => !usedCardIds.has(item.cardId)), [deck, usedCardIds]);
@@ -380,6 +542,67 @@ export function TarotApp() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [historyOpen, settingsOpen]);
 
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!imageExporting || !result || !exportRef.current) return;
+    let cancelled = false;
+    let objectUrl = "";
+
+    const frame = window.requestAnimationFrame(() => {
+      void (async () => {
+        try {
+          const exportNode = exportRef.current;
+          if (!exportNode) throw new Error("Export layout is unavailable");
+          await waitForExportImages(exportNode);
+          if (cancelled) return;
+
+          const width = Math.ceil(exportNode.scrollWidth);
+          const height = Math.ceil(exportNode.scrollHeight);
+          const pixelRatio = Math.min(2, window.devicePixelRatio || 1.5, 14000 / Math.max(width, height));
+          const blob = await toBlob(exportNode, {
+            width,
+            height,
+            backgroundColor: "#fdfdfc",
+            cacheBust: false,
+            pixelRatio,
+            skipFonts: true,
+          });
+          if (!blob) throw new Error("PNG generation returned no data");
+          if (cancelled) return;
+
+          objectUrl = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.download = `tarot-milktea-${new Date().toISOString().slice(0, 10)}.png`;
+          link.href = objectUrl;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          showNotice(language === "ko" ? "결과 이미지를 저장했습니다." : "The result image was saved.");
+        } catch {
+          if (!cancelled) showNotice(language === "ko" ? "결과 이미지를 저장하지 못했습니다. 잠시 후 다시 시도하세요." : "The result image could not be saved. Try again shortly.");
+        } finally {
+          if (objectUrl) {
+            const completedUrl = objectUrl;
+            objectUrl = "";
+            window.setTimeout(() => URL.revokeObjectURL(completedUrl), 1000);
+          }
+          if (!cancelled) setImageExporting(false);
+        }
+      })();
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageExporting, language, result, showNotice]);
+
   async function submitQuestion(event: FormEvent) {
     event.preventDefault();
     const value = question.trim();
@@ -388,7 +611,7 @@ export function TarotApp() {
       return;
     }
     setError("");
-    setNotice("");
+    setNotice(null);
     setPhase("planning");
     const minimumPlanningTime = holdStage(650);
     try {
@@ -563,7 +786,7 @@ export function TarotApp() {
     setRevealCount(0);
     setRecordId(createRecordId());
     setError("");
-    setNotice("");
+    setNotice(null);
     setExamplesOpen(false);
     setFollowupOpen(false);
     setResultView("summary");
@@ -583,7 +806,7 @@ export function TarotApp() {
       setHistory(await listReadings());
       setHistoryOpen(true);
     } catch (historyError) {
-      setNotice(userError(historyError, language));
+      showNotice(userError(historyError, language));
     }
   }
 
@@ -600,9 +823,9 @@ export function TarotApp() {
         result,
         followups,
       });
-      setNotice(language === "ko" ? "이 브라우저의 기록에 저장했습니다." : "Saved to this browser.");
+      showNotice(language === "ko" ? "이 브라우저의 기록에 저장했습니다." : "Saved to this browser.");
     } catch {
-      setNotice(language === "ko" ? "로컬 기록을 저장하지 못했습니다. 텍스트 복사를 사용하세요." : "The reading could not be saved locally. Use text copy instead.");
+      showNotice(language === "ko" ? "로컬 기록을 저장하지 못했습니다. 텍스트 복사를 사용하세요." : "The reading could not be saved locally. Use text copy instead.");
     }
   }
 
@@ -639,41 +862,25 @@ export function TarotApp() {
   async function copyResult() {
     if (!result) return;
     try {
-      await navigator.clipboard.writeText(resultText(round === 0 ? question : activeQuestion, result, language));
-      setNotice(language === "ko" ? "해석을 클립보드에 복사했습니다." : "The reading was copied to the clipboard.");
+      await writeClipboard(resultText(round === 0 ? question : activeQuestion, result, language));
+      showNotice(language === "ko" ? "해석을 클립보드에 복사했습니다." : "The reading was copied to the clipboard.");
     } catch {
-      setNotice(language === "ko" ? "복사 권한을 확인할 수 없습니다." : "Clipboard permission is unavailable.");
+      showNotice(language === "ko" ? "복사 권한을 확인할 수 없습니다." : "Clipboard permission is unavailable.");
     }
   }
 
   async function shareResult() {
-    if (!result) return;
-    const text = resultText(round === 0 ? question : activeQuestion, result, language);
     try {
-      if (navigator.share) await navigator.share({ title: language === "ko" ? "타로밀크티 웹 해석" : "Tarot Milktea Web reading", text });
-      else await navigator.clipboard.writeText(text);
-      setNotice(navigator.share ? (language === "ko" ? "공유 창을 열었습니다." : "The share sheet was opened.") : (language === "ko" ? "공유할 내용을 복사했습니다." : "Share text was copied."));
-    } catch (shareError) {
-      if ((shareError as Error).name !== "AbortError") setNotice(language === "ko" ? "공유하지 못했습니다." : "The reading could not be shared.");
+      await writeClipboard(new URL("/", window.location.origin).href);
+      showNotice(language === "ko" ? "사이트 주소를 복사했습니다." : "The site address was copied.");
+    } catch {
+      showNotice(language === "ko" ? "사이트 주소를 복사하지 못했습니다." : "The site address could not be copied.");
     }
   }
 
-  async function saveResultImage() {
-    if (!resultRef.current) return;
-    try {
-      const image = await toPng(resultRef.current, {
-        cacheBust: true,
-        pixelRatio: 1.5,
-        backgroundColor: "#151515",
-      });
-      const link = document.createElement("a");
-      link.download = `tarot-milktea-${new Date().toISOString().slice(0, 10)}.png`;
-      link.href = image;
-      link.click();
-      setNotice(language === "ko" ? "결과 이미지를 만들었습니다." : "The result image was created.");
-    } catch {
-      setNotice(language === "ko" ? "결과 이미지를 만들지 못했습니다. 인쇄 저장을 사용하세요." : "The result image could not be created. Use print-to-file instead.");
-    }
+  function saveResultImage() {
+    if (!result || imageExporting) return;
+    setImageExporting(true);
   }
 
   const revealedCard = revealCount > 0 ? latestCards[Math.min(revealCount, latestCards.length) - 1] : undefined;
@@ -750,23 +957,45 @@ export function TarotApp() {
             <GameDialog title={t.questionTitle}>
               <form className="dialog-question-form" onSubmit={submitQuestion}>
                 <textarea
+                  id="tarot-question"
+                  ref={questionInputRef}
                   value={question}
                   onChange={(event) => setQuestion(event.target.value.slice(0, 500))}
                   placeholder={t.questionPlaceholder}
                   minLength={5}
                   maxLength={500}
                   aria-label={t.questionAria}
+                  aria-describedby="question-character-count"
                   required
                 />
                 <div className="question-controls">
-                  <button className="text-control" type="button" onClick={() => setExamplesOpen((value) => !value)}>
+                  <button
+                    className="text-control"
+                    type="button"
+                    aria-expanded={examplesOpen}
+                    aria-controls="question-example-list"
+                    onClick={() => setExamplesOpen((value) => !value)}
+                  >
                     {t.examples} {examplesOpen ? t.close : t.open}
                   </button>
-                  <span className="character-count">{question.length} / 500</span>
+                  <span className="character-count" id="question-character-count">{question.length} / 500</span>
                 </div>
                 {examplesOpen ? (
-                  <div className="question-examples">
-                    {QUESTION_EXAMPLES[language].map((example) => <button key={example} type="button" onClick={() => setQuestion(example)}>{example}</button>)}
+                  <div className="question-examples" id="question-example-list">
+                    {QUESTION_EXAMPLES[language].map((example) => (
+                      <button
+                        key={example}
+                        type="button"
+                        onClick={() => {
+                          setQuestion(example);
+                          setExamplesOpen(false);
+                          setError("");
+                          questionInputRef.current?.focus();
+                        }}
+                      >
+                        {example}
+                      </button>
+                    ))}
                   </div>
                 ) : null}
                 {error ? <p className="game-error" role="alert">{error}</p> : null}
@@ -1098,20 +1327,32 @@ export function TarotApp() {
               </footer>
             </section>
 
-            <div className="result-command-bar no-print">
+            <div className="result-command-bar">
               <div className="result-tools">
                 <button type="button" onClick={saveCurrentReading}><Save size={15} />{t.save}</button>
                 <button type="button" onClick={copyResult}><Clipboard size={15} />{t.copy}</button>
                 <button type="button" onClick={shareResult}><Share2 size={15} />{t.share}</button>
-                <button type="button" onClick={saveResultImage}><Download size={15} />{t.image}</button>
-                <button type="button" onClick={() => window.print()}><Printer size={15} />{t.print}</button>
+                <button type="button" onClick={saveResultImage} disabled={imageExporting} aria-busy={imageExporting}><Download size={15} />{t.image}</button>
               </div>
               <div className="result-next-actions">
                 {followups.length < 2 ? <button className="game-button" type="button" onClick={() => setFollowupOpen(true)}>{t.followup} {followups.length}/2</button> : <span>{t.followupDone}</span>}
                 <button className="game-button primary" type="button" onClick={resetReading}>{t.newQuestion}<RotateCcw size={16} /></button>
               </div>
             </div>
-            {notice ? <p className="game-toast" role="status">{notice}<button type="button" onClick={() => setNotice("")} aria-label={t.closeNotice}><X size={14} /></button></p> : null}
+            {notice ? <p className="game-toast" role="status" aria-atomic="true">{notice.message}<button type="button" onClick={() => setNotice(null)} aria-label={t.closeNotice}><X size={14} /></button></p> : null}
+
+            {imageExporting ? (
+              <div className="reading-export-shell">
+                <ReadingExport
+                  nodeRef={exportRef}
+                  nickname={nickname}
+                  question={round === 0 ? question : activeQuestion}
+                  result={result}
+                  cards={cards}
+                  language={language}
+                />
+              </div>
+            ) : null}
 
             {followupOpen ? (
               <div className="game-overlay" role="presentation">
