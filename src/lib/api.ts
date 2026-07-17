@@ -72,9 +72,9 @@ export async function requestReadingPlan(
 export async function requestInterpretation(
   question: string,
   cards: SelectedCard[],
-  previous?: ReadingResult,
-  language: AppLanguage = "ko",
-  answerContract?: AnswerContract,
+  previous: ReadingResult | undefined,
+  language: AppLanguage,
+  answerContract: AnswerContract,
   context?: ReadingContext,
 ): Promise<{ data: ReadingResult; mode: ApiMode }> {
   const response = await fetchWithTimeout("/api/tarot", {

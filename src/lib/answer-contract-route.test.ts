@@ -1,224 +1,126 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { canUsePlanFallback, createAiInterpretation, stabilizeAnswerContractReading } from "@/app/api/tarot/route";
-import { enforceReadingQuality, type ExpectedInterpretation } from "@/src/lib/reading-quality";
-import { readingResultSchema } from "@/src/lib/schemas";
-import type { AnswerContract, ReadingResult } from "@/src/lib/tarot";
-import { ApiError } from "@/src/server/security";
+import {
+  createAiInterpretation,
+  createAiPlan,
+} from "@/app/api/tarot/route";
+import type { AnswerContract } from "@/src/lib/tarot";
 
-describe("candidate answer stabilization", () => {
-  it("renders an open lunch recommendation as a natural direct sentence without copying it into guidance", () => {
-    const result: ReadingResult = {
-      verdict: { kind: "recommend_one", value: "비빔밥", statement: "따뜻한 비빔밥을 추천해요." },
-      summary: "따뜻한 비빔밥을 추천해요. 여러 카드가 한 끼 식사를 지지해요.",
-      cardInterpretations: [],
-      synthesis: "카드 신호를 점심 메뉴에 적용했어요.",
-      guidance: ["재료를 한 그릇에 담아 바로 먹어요."],
-      axes: [],
-      signals: { support: 60, caution: 20, uncertainty: 20 },
-    };
-    const stabilized = stabilizeAnswerContractReading(result, {
-      kind: "recommend_one",
-      subject: "오늘 점심 메뉴 하나",
+function aiPlan(cardCount: number) {
+  return {
+    cardCount,
+    interpretationFrame: "질문에 답하는 데 필요한 역할을 카드로 읽어요.",
+    selectionGuide: `${cardCount}장의 카드를 선택해요.`,
+    positions: Array.from({ length: cardCount }, (_, index) => ({
+      id: `position-${index + 1}`,
+      title: `역할 ${index + 1}`,
+      focus: `최종 답에 필요한 관점 ${index + 1}`,
+    })),
+    answerContract: {
+      kind: "analysis",
+      subject: "질문의 핵심",
       candidates: [],
-      decisive: true,
-    }, "점심에 뭐 먹지?", "ko");
+      decisive: false,
+    },
+  };
+}
 
-    expect(stabilized.verdict?.statement).toBe("오늘 점심은 비빔밥을 먹어요.");
-    expect(stabilized.summary).toBe("오늘 점심은 비빔밥을 먹어요. 여러 카드가 한 끼 식사를 지지해요.");
-    expect(stabilized.guidance).toEqual(result.guidance);
+describe("AI-owned planning", () => {
+  it("keeps four roles chosen by the AI for a short question", async () => {
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify(aiPlan(4)) }));
+    const plan = await createAiPlan(
+      { run: workersRun },
+      "왜 이럴까?",
+      false,
+      "ko",
+    );
+    expect(plan.cardCount).toBe(4);
+    const request = workersRun.mock.calls[0][1] as { messages: Array<{ content: string }> };
+    expect(request.messages[1].content).not.toContain("기본 권장 수");
+    expect(request.messages[1].content).not.toMatch(/length\s*[><=]|\d+자\s*(?:이상|미만)/i);
   });
 
-  it("returns the last structurally valid interpretation instead of a 502 after style checks keep failing", async () => {
+  it("keeps two roles chosen by the AI for a long question", async () => {
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify(aiPlan(2)) }));
+    const plan = await createAiPlan(
+      { run: workersRun },
+      "지금까지 생긴 일과 제가 생각한 여러 가능성을 길게 설명했지만 중심 원인과 그 영향만 정확히 알고 싶어요.",
+      false,
+      "ko",
+    );
+    expect(plan.cardCount).toBe(2);
+  });
+
+  it("does not override the answer kind selected by the AI", async () => {
+    const payload = aiPlan(1);
+    payload.answerContract = {
+      kind: "explain",
+      subject: "계속 같은 고민을 하는 원인",
+      candidates: [],
+      decisive: false,
+    };
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify(payload) }));
+    const plan = await createAiPlan(
+      { run: workersRun },
+      "무엇을 고를지 계속 고민하는 이유가 뭘까?",
+      false,
+      "ko",
+    );
+    expect(plan.answerContract.kind).toBe("explain");
+  });
+});
+
+describe("generic interpretation", () => {
+  it("keeps the AI's direct sentence instead of applying a topic template", async () => {
+    const contract: AnswerContract = {
+      kind: "recommend_one",
+      subject: "새 캐릭터 이름 하나",
+      candidates: [],
+      decisive: true,
+    };
     const workersRun = vi.fn(async () => ({
       response: JSON.stringify({
-        verdict: { kind: "recommend_one", value: "비빔밥", statement: "점심 메뉴로 비빔밥을 추천해요." },
-        summary: "점심 메뉴로 비빔밥을 추천해요. 카드 신호가 이 메뉴를 가리켜요.",
+        verdict: { kind: "recommend_one", value: "루미", statement: "새 캐릭터 이름은 루미가 좋아요." },
+        summary: "별 카드의 밝은 이미지가 기억하기 쉬운 이름과 이어져요.",
         cardInterpretations: [{
-          cardId: "major-07",
-          positionTitle: "점심 메뉴 신호",
+          cardId: "major-17",
+          positionTitle: "이름의 핵심 인상",
           orientation: "upright",
-          text: "점심에는 한 그릇으로 완성되는 메뉴가 잘 맞아요.",
+          text: "밝고 또렷하게 기억되는 이름이 잘 맞아요.",
           reasoning: {
-            sourceMeaning: "",
-            questionConnection: "점심 메뉴 신호 자리에서 전차의 추진력은 여러 재료를 한 그릇에 모아 빠르게 먹는 선택으로 이어져요.",
-            decisionImpact: "이 신호는 비빔밥을 점심 메뉴로 정하는 데 강하게 작용해요.",
+            sourceMeaning: "별 정방향은 희망과 영감, 앞으로 나아갈 밝은 가능성을 뜻해요.",
+            questionConnection: "이름의 핵심 인상 자리에서 별의 희망과 영감은 밝고 선명한 소리의 이름으로 연결돼요.",
+            decisionImpact: "이 신호가 루미라는 짧은 이름을 선택하는 데 강한 근거가 돼요.",
           },
         }],
-        synthesis: "전차 카드는 여러 재료를 한 번에 모아 먹는 점심 식사를 고르는 근거가 돼요.",
-        guidance: ["한 그릇에 재료를 모아 바로 먹어요."],
+        synthesis: "별 카드는 밝고 기억하기 쉬운 인상을 가진 이름을 고르는 근거가 돼요.",
+        guidance: ["두 음절 발음을 소리 내어 확인해요."],
         axes: [
-          { label: "카드 강도", score: 70, evidence: "전차의 추진력을 반영했어요.", evidenceCardIds: ["major-07"] },
-          { label: "상징 연결", score: 65, evidence: "한 그릇 구성을 반영했어요.", evidenceCardIds: ["major-07"] },
-          { label: "결론 선명도", score: 72, evidence: "추천이 한쪽으로 모였어요.", evidenceCardIds: ["major-07"] },
+          { label: "기억성", score: 78, evidence: "밝은 인상이 이름을 기억하기 쉽게 해요.", evidenceCardIds: ["major-17"] },
+          { label: "발음 선명도", score: 74, evidence: "짧은 음절이 또렷하게 들려요.", evidenceCardIds: ["major-17"] },
+          { label: "결론 선명도", score: 70, evidence: "카드 신호가 한 이름으로 모여요.", evidenceCardIds: ["major-17"] },
         ],
-        signals: { support: 61, caution: 21, uncertainty: 18 },
+        signals: { support: 62, caution: 18, uncertainty: 20 },
       }),
     }));
-    const reading = await createAiInterpretation(
+
+    const result = await createAiInterpretation(
       { run: workersRun },
-      "점심에 뭐 먹지?",
+      "새 게임 캐릭터 이름 뭐가 좋을까?",
       [{
-        cardId: "major-07",
+        cardId: "major-17",
         reversed: false,
-        positionId: "menu-signal",
-        positionTitle: "점심 메뉴 신호",
-        positionFocus: "점심 메뉴를 정하는 카드 신호",
+        positionId: "name-impression",
+        positionTitle: "이름의 핵심 인상",
+        positionFocus: "카드가 가리키는 이름의 인상",
         round: 0,
       }],
       undefined,
       "ko",
-      { kind: "recommend_one", subject: "오늘 점심 메뉴 하나", candidates: [], decisive: true },
+      contract,
     );
 
-    expect(workersRun).toHaveBeenCalledTimes(3);
-    expect(reading.verdict?.statement).toBe("오늘 점심은 비빔밥을 먹어요.");
-    expect(reading.signals.support + reading.signals.caution + reading.signals.uncertainty).toBe(100);
-  });
-
-  it("does not repeat a direct outcome in the guidance list", () => {
-    const result: ReadingResult = {
-      verdict: {
-        kind: "outcome",
-        value: "실패",
-        statement: "이번 강화는 실패할 거예요.",
-      },
-      summary: "이번 강화는 실패할 거예요. 역방향 카드의 방해 신호가 더 강해요.",
-      cardInterpretations: [{
-        cardId: "major-07",
-        positionTitle: "강화 결과",
-        orientation: "reversed",
-        text: "강화 결과가 실패 쪽으로 기울어요.",
-        reasoning: {
-          sourceMeaning: "전차 역방향은 통제 상실과 방향 이탈을 뜻해요.",
-          questionConnection: "강화 결과 자리에서 통제 상실은 성공 흐름이 꺾이는 모습으로 이어져요.",
-          decisionImpact: "실패 쪽 결론에 강한 무게를 더해요.",
-        },
-        evidence: ["역방향 · 통제 상실", "자리 · 강화 결과"],
-      }],
-      synthesis: "전차 카드는 강화 과정의 통제가 무너지며 실패 쪽으로 기우는 근거가 돼요.",
-      guidance: ["강화 재료를 다시 모아요.", "다음 시도까지 기다려요."],
-      axes: [
-        { label: "성공 신호", score: 25, evidence: "성공을 지지하는 힘이 약해요.", evidenceCardIds: ["major-07"] },
-        { label: "실패 신호", score: 70, evidence: "통제 상실이 실패 쪽을 강화해요.", evidenceCardIds: ["major-07"] },
-        { label: "결론 선명도", score: 78, evidence: "부정 신호가 뚜렷해요.", evidenceCardIds: ["major-07"] },
-      ],
-      signals: { support: 25, caution: 55, uncertainty: 20 },
-    };
-
-    expect(stabilizeAnswerContractReading(result, {
-      kind: "outcome",
-      subject: "강화 성공 여부",
-      candidates: [],
-      decisive: true,
-    }).guidance).toEqual(result.guidance);
-  });
-
-  it("does not lead an open recommendation into card selection when AI is unavailable", () => {
-    const openRecommendation: AnswerContract = {
-      kind: "recommend_one",
-      subject: "오늘 먹을 메뉴 하나",
-      candidates: [],
-      decisive: true,
-    };
-    expect(canUsePlanFallback(openRecommendation)).toBe(false);
-    expect(canUsePlanFallback(openRecommendation, new ApiError(503, "DAILY_AI_LIMIT", "limit"))).toBe(true);
-    expect(canUsePlanFallback(openRecommendation, new ApiError(502, "INVALID_AI_RESPONSE", "invalid"))).toBe(true);
-
-    const suppliedChoice: AnswerContract = {
-      kind: "choose_one",
-      subject: "두 메뉴 중 하나",
-      candidates: ["김치찌개", "애호박찌개"],
-      decisive: true,
-    };
-    expect(canUsePlanFallback(suppliedChoice)).toBe(true);
-  });
-
-  it("repairs direct-answer placement without replacing the AI reading", () => {
-    const answerContract: AnswerContract = {
-      kind: "choose_one",
-      subject: "제시된 아침 식사 메뉴 중 하나",
-      candidates: ["토스트", "계란볶음밥", "과일 요거트"],
-      decisive: true,
-    };
-    const expectedCards: ExpectedInterpretation[] = [
-      {
-        cardId: "major-04",
-        cardName: "황제",
-        positionTitle: "토스트 선택",
-        positionFocus: "토스트 선택에 카드가 주는 지지와 주의 신호",
-        orientation: "reversed",
-        orientationLabel: "역방향",
-        sourceMeaning: "황제 역방향의 핵심은 경직·권위 충돌·통제 상실이에요. 규칙이 목적을 잃고 과도한 통제로 변할 수 있어요.",
-        sourceKeywords: ["경직", "권위 충돌"],
-        evidence: ["역방향 · 경직 · 권위 충돌", "자리 · 토스트 선택"],
-      },
-      {
-        cardId: "wands-04",
-        cardName: "완드 4",
-        positionTitle: "계란볶음밥 선택",
-        positionFocus: "계란볶음밥 선택에 카드가 주는 지지와 주의 신호",
-        orientation: "reversed",
-        orientationLabel: "역방향",
-        sourceMeaning: "완드 4 역방향의 핵심은 불안정·소속감 부족·행사 차질이에요. 겉과 내부의 안정감이 다를 수 있어요.",
-        sourceKeywords: ["불안정", "소속감 부족"],
-        evidence: ["역방향 · 불안정 · 소속감 부족", "자리 · 계란볶음밥 선택"],
-      },
-      {
-        cardId: "cups-knight",
-        cardName: "컵 기사",
-        positionTitle: "과일 요거트 선택",
-        positionFocus: "과일 요거트 선택에 카드가 주는 지지와 주의 신호",
-        orientation: "upright",
-        orientationLabel: "정방향",
-        sourceMeaning: "컵 기사 정방향의 핵심은 제안·이상·낭만이에요. 감정과 이상을 바탕으로 적극적인 제안을 할 수 있어요.",
-        sourceKeywords: ["제안", "이상"],
-        evidence: ["정방향 · 제안 · 이상", "자리 · 과일 요거트 선택"],
-      },
-    ];
-    const ungroundedAiResult: ReadingResult = {
-      verdict: {
-        kind: "choose_one",
-        value: "과일 요거트",
-        statement: "아침 식사 메뉴로 과일 요거트를 추천해요.",
-      },
-      summary: "아침 식사 메뉴로 과일 요거트를 추천해요. 과일 요거트가 더 편안한 식사가 될 거예요.",
-      cardInterpretations: expectedCards.map((card) => ({
-        cardId: card.cardId,
-        positionTitle: card.positionTitle,
-        orientation: card.orientation,
-        text: "준비 과정과 식사 환경을 예측해요.",
-        reasoning: {
-          sourceMeaning: card.sourceMeaning,
-          questionConnection: "카드가 메뉴의 실제 준비 상태와 식사 환경을 보여줘요.",
-          decisionImpact: "이 메뉴가 더 만족스러운 결과를 가져올 거예요.",
-        },
-        evidence: card.evidence,
-      })),
-      synthesis: "토스트는 복잡하고 계란볶음밥은 불안정하며 과일 요거트는 편안해요.",
-      guidance: ["편안한 메뉴를 골라요."],
-      axes: [
-        { label: "준비 편의", score: 50, evidence: "준비를 예측해요.", evidenceCardIds: ["major-04"] },
-        { label: "식사 환경", score: 50, evidence: "환경을 예측해요.", evidenceCardIds: ["wands-04"] },
-        { label: "만족감", score: 50, evidence: "만족을 예측해요.", evidenceCardIds: ["cups-knight"] },
-      ],
-      signals: { support: 50, caution: 30, uncertainty: 20 },
-    };
-
-    const stabilized = stabilizeAnswerContractReading(ungroundedAiResult, answerContract);
-
-    expect(readingResultSchema.parse(stabilized)).toEqual(stabilized);
-    expect(stabilized.summary.startsWith(ungroundedAiResult.verdict!.statement)).toBe(true);
-    expect(stabilized.cardInterpretations).toEqual(ungroundedAiResult.cardInterpretations);
-    expect(stabilized.axes).toEqual(ungroundedAiResult.axes);
-    expect(JSON.stringify(stabilized)).toMatch(/더 편안한 식사|실제 준비 상태|더 만족스러운 결과|토스트는 복잡/);
-    expect(stabilized.signals.support + stabilized.signals.caution + stabilized.signals.uncertainty).toBe(100);
-    expect(() => enforceReadingQuality(stabilized, {
-      question: "토스트, 계란볶음밥, 과일 요거트 중 아침 메뉴 하나를 골라줘",
-      language: "ko",
-      sourceSentences: [],
-      expectedCards,
-      answerContract,
-    })).toThrow();
+    expect(result.verdict?.statement).toBe("새 캐릭터 이름은 루미가 좋아요.");
+    expect(workersRun).toHaveBeenCalledTimes(1);
   });
 });

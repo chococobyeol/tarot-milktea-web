@@ -1,27 +1,17 @@
 import {
-  designReading,
-  createAnswerContract,
-  detectQuestionCategory,
-  generateReadingResult,
   getCard,
   orientationLabel,
-  toKoreanHaeyo,
   CARD_BY_ID,
   type AnswerContract,
   type ReadingContext,
   type ReadingPlan,
   type ReadingLanguage,
   type ReadingResult,
+  type SelectedCard,
 } from "@/src/lib/tarot";
 import {
-  concreteWritingGuide,
-  detectEverydayDomain,
   enforcePlanQuality,
   enforceReadingQuality,
-  groundPositionConnection,
-  polishReadingLanguage,
-  questionScopeGuide,
-  resolveEverydayDomain,
   type ExpectedInterpretation,
 } from "@/src/lib/reading-quality";
 import {
@@ -58,8 +48,9 @@ const GROQ_INTERPRETATION_MAX_TOKENS = 3_600;
 const SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
 - 요청에서 지정한 출력 언어로 중립적이고 분석적인 문장을 쓴다.
 - 인사, 위로, 신비주의적 수사, 감탄, 사람처럼 느끼는 표현을 쓰지 않는다.
-- 카드, 방향, 자리 역할과 질문의 관계를 근거로 설명한다.
-- 질문의 크기에 맞춰 해석 범위를 제한한다. 식사나 오늘의 선택 같은 일상 질문을 인생, 재정, 조직, 타인 관계 문제로 확대하지 않는다.
+- 질문 전체와 대화 문맥을 읽어 사용자가 실제로 요구한 답의 형태와 범위를 판단한다.
+- 카드 원뜻, 방향, 자리 역할에서 실제 답까지 이어지는 논리를 설명한다.
+- 질문에 없는 주제로 범위를 확대하지 않는다.
 - 한국어로 쓸 때는 주어와 행동이 드러나는 짧고 자연스러운 문장을 사용한다. 카드 키워드와 자리 이름을 추상명사로 나열하지 않는다.
 - 한국어 출력은 자연스러운 "-해요/-이에요" 해요체로 통일한다. "-한다/-이다"나 "-합니다/-입니다" 문체를 섞지 않는다.
 - 사용자가 요구한 답의 형태를 가장 먼저 지킨다. 하나를 골라 달라면 하나를 고르고, 추천해 달라면 구체적인 추천 하나를 말하고, 예측·조언·원인 설명을 요청하면 그 결론부터 말한다.
@@ -67,12 +58,11 @@ const SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
 - "서로 다른 측면", "요소가 상호작용한다", "균형 잡힌 고려", "분리를 통해 접근" 같은 내용 없는 문장을 쓰지 않는다.
 - 요약, 종합 해석, 확인할 점에서 같은 내용을 반복하지 않는다.
 - 카드별 sourceMeaning에서는 제공된 원뜻을 정확히 설명하고, 그 밖의 영역에서는 카드 데이터 문장을 그대로 복사하지 말고 질문에 맞는 실제 판단 기준이나 행동으로 바꿔 쓴다.
-- 카드 상징에서 읽히는 취향, 맛, 포만감, 영양, 몸 상태, 날씨, 상대의 감정, 성공·실패와 미래 흐름을 질문에 맞게 자유롭게 추론한다.
-- 결과를 묻는 질문은 "성공할 가능성이 높아요", "이번에는 실패할 거예요", "합격 쪽이에요"처럼 카드 배열이 가리키는 한쪽을 첫 문장에서 분명히 말한다. 불확실성이나 현실 확인 사항을 이유로 결론을 취소하지 않는다.
-- 숫자는 화면의 AI 해석 지표로만 작성한다. 검사 결과, 실제 통계, 정확한 확률이나 의학적 진단을 받은 것처럼 출처를 꾸며내지만 않는다.
+- 질문의 분야가 무엇이든 카드 상징에서 필요한 성질·상태·감정·결과를 자유롭게 추론하되, 어떤 카드 원뜻과 자리 역할에서 나온 판단인지 밝힌다.
+- 결과를 묻는 질문은 카드 배열이 가리키는 한쪽을 첫 문장에서 분명히 말하고, 현실의 불확실성을 이유로 결론을 취소하지 않는다.
+- 숫자는 화면의 AI 해석 지표로만 작성한다. 검사 결과, 실제 통계, 정확한 확률이나 의학적 진단을 받은 것처럼 출처를 꾸며내지 않는다.
 - 제공된 카드 의미 데이터의 범위를 벗어난 의미를 확정적으로 추가하지 않는다.
-- 열린 추천 요청에서는 카드 공개 전 후보를 만들거나 범위를 임의로 좁히지 않는다. 모든 카드를 해석한 뒤 질문에 맞는 구체적인 답 하나를 처음 제안하고, 카드 의미가 그 답의 맛·분위기·효과·감정과 어떻게 이어지는지 구체적으로 설명한다.
-- 열린 식사 추천에서는 한 카드의 편안함·회복·안정 신호만 보고 늘 비슷한 부드러운 건강식으로 수렴하지 않는다. 전체 카드에서 식사량, 맛의 강도, 온도, 질감, 조리 방식, 익숙함 중 서로 다른 신호를 두 가지 이상 조합하고, 아침·점심·저녁에 자연스러운 완성된 메뉴 하나를 정한다.
+- 열린 추천 요청에서는 카드 공개 전 후보를 만들거나 범위를 임의로 좁히지 않는다. 모든 카드를 해석한 뒤 질문에 맞는 구체적인 답 하나를 처음 제안하고, 카드 의미가 그 답과 어떻게 이어지는지 구체적으로 설명한다.
 - "이 질문에서는", "질문에 따르면", "추천할 수 있는 것은" 같은 메타 문장으로 시작하지 않는다. 사용자가 바로 이해할 수 있는 답부터 쓴다.
 - 반드시 JSON 객체만 출력한다.`;
 
@@ -85,8 +75,9 @@ function extractResponseText(result: unknown): string {
     if (typeof record.result === "string") return record.result;
     if (record.result && typeof record.result === "object") return JSON.stringify(record.result);
     if (typeof record.output_text === "string") return record.output_text;
-    if (Array.isArray(record.output)) {
-      const collectOutputText = (messageOnly: boolean) => record.output.flatMap((item) => {
+    const output = record.output;
+    if (Array.isArray(output)) {
+      const collectOutputText = (messageOnly: boolean) => output.flatMap((item: unknown) => {
         if (!item || typeof item !== "object" || Array.isArray(item)) return [];
         const outputItem = item as Record<string, unknown>;
         if (messageOnly && outputItem.type !== "message") return [];
@@ -134,38 +125,9 @@ function normalizeSignalDistribution(value: unknown): unknown {
   return { support, caution, uncertainty: 100 - support - caution };
 }
 
-function foodProfileSignals(
-  card: ReturnType<typeof getCard>,
-  reversed: boolean,
-  language: ReadingLanguage,
-): string[] {
-  const caution = language === "ko"
-    ? (reversed ? "이 성질은 과하게 쓰지 말고 강도를 낮춰 반영" : "이 성질을 메뉴의 주된 특징으로 반영 가능")
-    : (reversed ? "Use this trait lightly rather than making it dominant" : "This trait can be a defining menu feature");
-  if (!card.suit) {
-    const meaning = card[reversed ? "reversed" : "upright"];
-    return language === "ko"
-      ? [`핵심 성질: ${meaning.keywords.slice(0, 3).join("·")}`, "다른 카드의 맛·식사량·조리 신호와 결합해 메뉴로 번역", caution]
-      : [`Core traits: ${meaning.keywords.slice(0, 3).join(", ")}`, "Translate these traits into a menu only after combining the other cards' flavor, portion, and preparation signals", caution];
-  }
-  const signals = (language === "ko" ? {
-    wands: ["맛의 강도: 뚜렷하고 활기찬 쪽", "조리 방식: 불을 쓰는 볶음·구이 계열의 성질"],
-    cups: ["질감: 촉촉하거나 국물이 있는 쪽", "식사 분위기: 편안하고 만족감 있는 성질"],
-    swords: ["맛의 인상: 선명하고 깔끔한 쪽", "조리 부담: 빠르고 군더더기 없는 성질"],
-    pentacles: ["식사량: 한 끼로 든든한 쪽", "구성: 밥·곡물·재료의 존재감이 분명한 성질"],
-  } : {
-    wands: ["Flavor intensity: bold and energetic", "Cooking character: heat-driven, grilled, or stir-fried"],
-    cups: ["Texture: moist or broth-forward", "Meal mood: comforting and satisfying"],
-    swords: ["Flavor impression: clean and distinct", "Preparation: quick and uncluttered"],
-    pentacles: ["Portion: substantial enough for a full meal", "Composition: grounded, grain- or ingredient-forward"],
-  })[card.suit];
-  return [...signals, caution];
-}
-
 function normalizeReadingShape(
   value: unknown,
   expectedCards: ExpectedInterpretation[],
-  language: ReadingLanguage,
 ): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
@@ -210,21 +172,12 @@ function normalizeReadingShape(
       const reasoningRecord = reasoning && typeof reasoning === "object" && !Array.isArray(reasoning)
         ? reasoning as Record<string, unknown>
         : null;
-      const questionConnection = typeof reasoningRecord?.questionConnection === "string"
-        ? (language === "ko"
-          ? groundPositionConnection(reasoningRecord.questionConnection, expected.positionTitle)
-          : reasoningRecord.questionConnection)
-        : reasoningRecord?.questionConnection;
       return {
         ...interpretation,
         positionTitle: expected.positionTitle,
         orientation: expected.orientation,
         reasoning: reasoningRecord
-          ? {
-            ...reasoningRecord,
-            questionConnection,
-            ...(expected.sourceMeaning ? { sourceMeaning: expected.sourceMeaning } : {}),
-          }
+          ? { ...reasoningRecord }
           : reasoning,
         evidence: expected.evidence,
       };
@@ -248,66 +201,6 @@ function normalizeReadingShape(
     cardInterpretations,
     axes: normalizedAxes,
     signals: normalizeSignalDistribution(record.signals),
-  };
-}
-
-export function stabilizeAnswerContractReading(
-  result: ReadingResult,
-  contract: AnswerContract,
-  question = "",
-  language: ReadingLanguage = "ko",
-): ReadingResult {
-  const verdict = result.verdict;
-  if (!verdict) return result;
-  const oldStatement = verdict.statement.trim();
-  let statement = oldStatement;
-  if (
-    language === "ko"
-    && contract.kind === "recommend_one"
-    && /아침|점심|저녁|식사|메뉴|끼니|(?:뭐|무엇).{0,5}먹|먹(?:을까|지|을지|는 게)/u.test(question)
-  ) {
-    const menu = verdict.value.trim();
-    const lastKorean = [...menu].reverse().find((character) => /[가-힣]/u.test(character));
-    const code = lastKorean ? lastKorean.charCodeAt(0) - 0xac00 : -1;
-    const objectParticle = code >= 0 && code <= 11171 && code % 28 !== 0 ? "을" : "를";
-    const meal = /아침/u.test(question)
-      ? "오늘 아침은"
-      : /점심/u.test(question)
-        ? "오늘 점심은"
-        : /저녁/u.test(question)
-          ? "오늘 저녁은"
-          : /오늘/u.test(question)
-            ? "오늘은"
-            : "이번 식사는";
-    statement = `${meal} ${menu}${objectParticle} 먹어요.`;
-  }
-
-  const summaryDetail = result.summary.trimStart().startsWith(oldStatement)
-    ? result.summary.trimStart().slice(oldStatement.length).trim()
-    : result.summary.trim();
-  const summary = summaryDetail ? `${statement} ${summaryDetail}` : statement;
-  const stabilized = {
-    ...result,
-    verdict: { ...verdict, statement },
-    summary,
-  };
-  if (!contract.decisive) return stabilized;
-  if (contract.kind === "outcome" || contract.kind === "recommend_one") return stabilized;
-  const normalizedStatement = statement.toLowerCase().replace(/[^0-9a-z가-힣]/g, "");
-  const guidanceAlreadyActsOnVerdict = result.guidance.some((item) => (
-    item.toLowerCase().replace(/[^0-9a-z가-힣]/g, "").includes(normalizedStatement)
-    || item.toLowerCase().replace(/[^0-9a-z가-힣]/g, "").includes(
-      verdict.value.toLowerCase().replace(/[^0-9a-z가-힣]/g, ""),
-    )
-  ));
-  return {
-    ...stabilized,
-    guidance: guidanceAlreadyActsOnVerdict
-      ? result.guidance
-      : [
-        statement,
-        ...result.guidance,
-      ].slice(0, 4),
   };
 }
 
@@ -444,16 +337,12 @@ export async function createAiPlan(
   context?: ReadingContext,
   groqApiKey?: string,
 ): Promise<ReadingPlan> {
-  const localPlan = designReading(question, followup, language, context);
   const prompt = `다음 질문을 위한 ${followup ? "추가" : "최초"} 타로 리딩 구조를 설계하라.
 현재 질문: ${JSON.stringify(question)}
 대화 맥락: ${JSON.stringify(context ?? null)}
 출력 언어: ${language === "ko" ? "한국어" : "English"}. JSON 키는 스키마 그대로 유지하고 모든 사용자 표시 문자열 값은 이 언어로 작성한다.
-질문 범위 지침: ${questionScopeGuide(question, language)}
-문장 구체성 지침: ${concreteWritingGuide(question, language)}
 
-먼저 주제가 아니라 사용자가 요구한 답의 형태를 answerContract로 정한다.
-문장 안에 다른 질문 표현이 들어 있어도 문장 전체에서 사용자가 최종적으로 요구한 행위를 기준으로 정한다. 어떤 선택을 계속 고민하는 이유를 묻는 문장은 선택 요청이 아니라 explain이다.
+질문 전체와 대화 문맥을 이해한 뒤 answerContract, 카드 수, 자리 역할을 한 번에 결정한다. 단어 하나가 아니라 사용자가 문장 전체에서 요구한 답을 기준으로 판단한다.
 - choose_one: 사용자가 제시한 후보 중 하나를 골라 달라는 요청. candidates에는 질문의 후보를 철자 그대로 2~5개 넣고 decisive=true.
 - recommend_one: 정해진 후보 없이 구체적인 대상이나 행동 하나를 추천해 달라는 요청. candidates는 반드시 빈 배열이고 decisive=true다. 카드 공개 전에는 내부적으로도 후보 목록을 만들지 않는다. 카드를 모두 해석한 뒤에만 질문의 제약 안에서 구체적인 답 하나를 생성한다.
 - yes_no: 해야 하는지, 가능한지처럼 예/아니요 방향을 요청. 출력 언어의 예/아니요 후보 2개와 decisive=true.
@@ -464,15 +353,13 @@ export async function createAiPlan(
 - explain: 이유나 원인을 묻는 질문이며 decisive=false.
 - analysis: 위 유형이 아닌 상태·관계·의미 분석 질문이며 decisive=false.
 decisive는 choose_one, recommend_one, yes_no, outcome, advice에서 true이고 compare, forecast, explain, analysis에서는 false이다.
-후속 질문이 "그래서", "결국", "정확히", "어느 쪽"처럼 앞선 결론을 가리키면 대화 맥락의 previousContract와 원 질문을 이어서 해석한다. 사용자가 직접 제시한 후보만 이어받을 수 있으며, recommend_one에는 이전 후보를 상속하지 않는다. 새 대상을 묻는 질문이면 이전 후보를 상속하지 않는다.
-answerContract.subject에는 지금 답해야 할 대상을 현재 질문의 핵심 명사를 직접 사용해 한 문장으로 적고, candidates가 필요 없는 유형은 빈 배열을 쓴다.
+후속 질문이 앞선 결론을 이어 가는지 새 대상을 묻는지도 문맥으로 판단한다. 명시 후보는 현재 질문이나 previousContract에서 사용자가 제시한 것만 사용할 수 있다. recommend_one에는 후보를 만들거나 상속하지 않는다.
+answerContract.subject에는 지금 답해야 할 대상을 짧고 구체적으로 적는다. candidates가 필요 없는 유형은 빈 배열을 쓴다.
 
-카드 수는 질문의 범위에 따라 1~5장이다. 기본 권장 수는 ${localPlan.cardCount}장이지만 질문을 읽고 조정할 수 있다.
+카드 수는 질문에 실제로 필요한 서로 다른 역할의 수에 따라 1~5장으로 정한다. 질문 글자 수나 특정 단어가 아니라, 답을 내는 데 필요한 관점 수를 기준으로 한다. 의미가 겹치는 자리를 카드 수를 늘리기 위해 만들지 않는다.
 choose_one, yes_no, compare는 후보마다 카드 한 장을 배정하므로 cardCount와 positions 길이를 candidates 길이와 같게 한다. 각 position의 title 또는 focus에 해당 후보 이름을 철자 그대로 넣는다.
-recommend_one은 후보별 자리를 만들지 않는다. 질문에 맞는 해석 역할 1~5개를 만들고, 짧은 일상 추천에는 보통 2~3장을 사용한다. 각 title은 짧고 서로 다른 역할이어야 하며, 질문의 핵심 대상이나 행동을 직접 포함한다. "샌드위치 선택", "요거트 선택"처럼 카드 공개 전 구체 후보를 position에 넣지 않는다. interpretationFrame과 selectionGuide에도 후보 이름을 쓰지 않는다.
-한국어 title은 전체 질문을 반복하지 않는 4~12자의 자연스러운 UI 라벨로 쓴다. "아침 식사 선택의 행동", "메뉴의 특징"처럼 설문 항목 같은 표현을 피하고, 질문에 맞춰 "메뉴 신호", "주의할 흐름", "최종 메뉴 단서"처럼 역할이 바로 읽히게 쓴다. 이 예시를 고정 복사하지 말고 질문마다 필요한 역할을 정한다.
-자리 역할은 질문에 실제로 답하는 구체적인 비교 기준으로 작성한다. title마다 현재 질문의 핵심 명사나 행동을 직접 넣는다. "방향성", "외부 조건", "실행 가능성", "현재 상황", "현재 상태", "핵심 기준", "선택 기준", "조정 방향"처럼 어느 질문에나 붙일 수 있는 제목은 사용하지 않는다.
-짧은 일상 질문에서는 질문에 실제로 나온 대상과 행동을 중심으로 쓴다. 질문에 직접 나오지 않은 맛·취향·감정·몸 상태·예상 결과도 카드 상징에서 읽히면 구체적인 해석 기준으로 사용할 수 있다.
+recommend_one은 후보별 자리를 만들지 않는다. 질문에 답하기 위해 필요한 서로 다른 역할만 만든다. 구체적인 추천 대상은 카드 공개 뒤 해석 단계에서 처음 정한다.
+각 title은 화면에서 바로 이해되는 짧은 라벨이고, focus는 그 카드가 최종 답에 어떤 정보를 더할지 구체적으로 설명한다. 어느 질문에나 그대로 붙는 추상적인 자리나 설문 문항 같은 표현을 피한다.
 응답 JSON 스키마:
 {
   "cardCount": 1~5 정수,
@@ -481,9 +368,6 @@ recommend_one은 후보별 자리를 만들지 않는다. 질문에 맞는 해�
   "positions": [{ "id": "고유 영문 ID", "title": "자리 이름", "focus": "이 자리가 살펴볼 관점" }],
   "answerContract": { "kind": "choose_one|recommend_one|yes_no|outcome|compare|forecast|advice|explain|analysis", "subject": "직접 답할 대상", "candidates": [], "decisive": true }
 }
-answerContract 예시:
-- 열린 추천: { "kind": "recommend_one", "subject": "오늘 먹을 메뉴 하나", "candidates": [], "decisive": true }
-- 사용자가 "김치찌개와 애호박찌개 중 골라줘"라고 한 명시 선택: { "kind": "choose_one", "subject": "두 메뉴 중 최종 선택", "candidates": ["김치찌개", "애호박찌개"], "decisive": true }
 positions 길이는 cardCount와 같아야 한다.
 interpretationFrame은 자리 이름을 다시 나열하지 말고, 이번 리딩에서 무엇을 판단할지 한 문장으로 쓴다.`;
   const provider = createReadingAiProvider(ai, groqApiKey, GROQ_PLAN_MODEL, 900, false);
@@ -496,24 +380,14 @@ interpretationFrame은 자리 이름을 다시 나열하지 말고, 이번 리�
 export async function createAiInterpretation(
   ai: WorkersAIBinding,
   question: string,
-  cards: Parameters<typeof generateReadingResult>[1],
-  previous?: ReadingResult,
-  language: ReadingLanguage = "ko",
-  answerContract?: AnswerContract,
+  cards: SelectedCard[],
+  previous: ReadingResult | undefined,
+  language: ReadingLanguage,
+  answerContract: AnswerContract,
   context?: ReadingContext,
   groqApiKey?: string,
 ): Promise<ReadingResult> {
-  const contract = answerContract ?? createAnswerContract(question, context, language);
-  const scopeQuestion = [
-    question,
-    contract.subject,
-    context?.initialQuestion,
-    ...(context?.previousQuestions ?? []),
-  ].filter((value): value is string => Boolean(value)).join("\n");
-  const currentDomain = detectEverydayDomain(question);
-  const everydayDomain = resolveEverydayDomain(question, context);
-  const guideQuestion = currentDomain || !everydayDomain ? question : scopeQuestion;
-  const category = detectQuestionCategory(question);
+  const contract = answerContract;
   const latestRound = Math.max(...cards.map((card) => card.round));
   const cardsToInterpret = previous ? cards.filter((card) => card.round === latestRound) : cards;
   const expectedCards: ExpectedInterpretation[] = cardsToInterpret.map((selected) => {
@@ -527,9 +401,6 @@ export async function createAiInterpretation(
       positionFocus: selected.positionFocus,
       orientation: selected.reversed ? "reversed" : "upright",
       orientationLabel: direction,
-      sourceMeaning: language === "ko"
-        ? toKoreanHaeyo(`${card.nameKo} ${direction}의 핵심은 ${meaning.keywords.slice(0, 3).join("·")}이다. ${meaning.summary}`)
-        : "",
       sourceKeywords: meaning.keywords,
       evidence: language === "ko"
         ? [
@@ -562,27 +433,16 @@ export async function createAiInterpretation(
           coreMeaning: meaning.summary,
           cautionTheme: meaning.caution,
         },
-        ...(everydayDomain ? {} : { relevantContext: card.contexts[category] }),
       },
-      ...(everydayDomain === "food" ? {
-        foodProfileSignals: foodProfileSignals(card, selected.reversed, language),
-      } : {}),
     };
   });
   const lengthGuide = language === "ko"
-    ? (everydayDomain
-      ? (cardsToInterpret.length === 1
-        ? "전체 한국어 본문은 450~900자"
-        : cardsToInterpret.length === 2
-          ? "전체 한국어 본문은 650~1200자"
-          : "전체 한국어 본문은 1100~2100자")
-      : (previous ? "전체 한국어 본문은 700~1400자" : "전체 한국어 본문은 900~1900자"))
+    ? (cardsToInterpret.length === 1
+      ? "전체 한국어 본문은 450~850자"
+      : cardsToInterpret.length === 2
+        ? "전체 한국어 본문은 650~1150자"
+        : "전체 한국어 본문은 900~1800자")
     : (previous ? "The complete English response should be about 350–700 words" : "The complete English response should be about 450–1000 words");
-  const sourceSentences = cardsToInterpret.flatMap((selected) => {
-    const card = getCard(selected.cardId);
-    const meaning = card[selected.reversed ? "reversed" : "upright"];
-    return [meaning.caution, meaning.summary];
-  });
   const previousContext = previous ? {
     priorConclusion: previous.summary,
     priorVerdict: previous.verdict,
@@ -602,47 +462,38 @@ export async function createAiInterpretation(
     : "";
   const contractGuide = `답변 계약: ${JSON.stringify(contract)}
 - verdict.kind는 answerContract.kind와 같아야 한다.
-- verdict.value에는 질문에 대한 실제 답만 짧게 쓴다. 판단 기준, 질문 재진술, "적당한 것", "상황에 맞는 선택" 같은 범주 표현을 답으로 쓰지 않는다.
-- verdict.statement는 verdict.value를 포함한 완결된 직접 답변 한 문장이다. answerContract.subject 또는 현재 질문의 핵심 대상을 문장 안에 직접 밝혀, 다른 질문에도 그대로 붙일 수 있거나 엉뚱한 답이 되지 않게 한다. summary는 이 문장으로 시작한 뒤 카드 근거를 설명한다.
+- verdict.value에는 질문에 대한 실제 답만 짧게 쓴다. 질문을 되풀이하거나 판단 기준만 답으로 쓰지 않는다.
+- verdict.statement는 verdict.value를 포함하고, 현재 질문을 보지 않아도 무엇에 대한 답인지 이해되는 자연스러운 한 문장이다.
 - choose_one과 yes_no에서는 candidates 중 정확히 하나를 verdict.value로 고른다. 둘 이상을 합치거나 후보 밖 답을 만들지 않는다.
-- outcome에서는 카드가 가리키는 결과 한쪽을 verdict.value에 짧게 쓴다. "성공", "실패", "합격", "불합격", "연락이 옴"처럼 질문의 결과어를 사용하고, verdict.statement에서 "이번 강화는 성공할 가능성이 높아요" 또는 "이번에는 실패할 거예요"처럼 바로 답한다.
-- recommend_one에서는 candidates가 비어 있다. 모든 카드의 역할과 의미를 해석한 뒤, 질문만으로는 정해지지 않았던 구체적인 대상이나 행동 하나를 verdict.value로 새로 만든다. 범주나 판단 기준이 아니라 사용자가 그대로 선택·실행할 수 있는 완성된 이름을 답하고, 둘 이상의 대안을 함께 말하지 않는다. verdict.value에는 온도·분위기·조건 같은 설명절을 붙이지 말고 짧은 이름만 쓰며, 한국어 기준 28자를 넘기지 않는다.
-- 카드 상징을 바탕으로 맛·취향·친숙함·새로움·포만감·영양·몸 상태·상대 감정·미래 결과를 자유롭게 추정하고, 그 추정이 카드의 어떤 원뜻과 자리에서 나온 것인지 설명한다.
+- outcome에서는 카드가 가리키는 결과 한쪽을 질문에 맞는 말로 바로 답한다.
+- recommend_one에서는 모든 카드의 역할과 의미를 해석한 뒤 사용자가 그대로 선택하거나 실행할 수 있는 구체적인 대상 또는 행동 하나를 처음 만든다. 범주·조건·후보 목록으로 대신하지 않는다.
+- 어떤 분야든 질문에 답하는 데 필요한 속성이나 상태를 카드 상징에서 자유롭게 추론하고, 그 추정이 어떤 원뜻과 자리에서 나온 것인지 설명한다.
 - compare는 핵심 차이를, forecast는 가장 가능성이 큰 방향이나 시기를, advice는 먼저 할 행동을, explain은 중심 원인을, analysis는 가장 중요한 발견을 verdict.value에 직접 쓴다.
-- explain의 statement는 "중심 원인은 …", forecast는 "예상 시기/가장 가능성이 큰 흐름은 …", advice는 "먼저 할 행동은 …", analysis는 "핵심은 …"처럼 답의 유형이 실제로 충족됐는지 첫 문장만 읽어도 알 수 있게 쓴다. 질문을 다시 말하거나 "살펴본다/확인한다"로 끝내지 않는다.
-- decisive=true이면 "상황에 따라", "조건을 더 확인", "판단하기 어렵다", "둘 다"로 답을 미루지 않는다. 카드가 강한 주의 신호를 보이더라도 그 신호를 결론의 이유로 설명하고 답을 다시 열지 않는다.
-- 후보 비교형(choose_one, yes_no, compare)에서도 카드 의미를 후보의 맛·분위기·효과·감정·예상 결과와 구체적으로 연결할 수 있다. 각 추정은 해당 후보 자리에 놓인 카드 원뜻을 근거로 설명한다.
+- 첫 문장만 읽어도 요청한 답의 형태가 충족되어야 한다. 질문을 다시 말하거나 "살펴본다/확인한다"로 끝내지 않는다.
+- decisive=true이면 답을 미루거나 복수 대안을 다시 열지 않는다. 주의 신호는 결론을 취소하는 문장이 아니라 그 결론의 근거로 설명한다.
+- 후보 비교형에서도 각 후보 자리에 놓인 카드 원뜻을 후보의 실제 차이와 예상 결과에 연결한다.
 - 후보 비교형 axes는 후보마다 하나씩 만들고 각 label을 해당 후보 이름으로 시작한다. 후보가 2개라서 최소 3개 축이 필요할 때는 선택이면 "결론 선명도", compare이면 "비교 선명도" 축 하나만 추가한다. 질문에 없는 별도 평가 속성을 축으로 만들지 않는다.
-- recommend_one의 axes는 공개 전 만들지 않은 대안들을 사후에 나열하지 않는다. 카드 역할과 질문의 실제 판단 신호를 3~5개 축으로 표시하고, 특정 후보 간 비교인 것처럼 꾸미지 않는다.`;
-  const openFoodGuide = everydayDomain === "food" && contract.kind === "recommend_one"
-    ? `열린 식사 추천 생성 지침:
-- 카드 공개 뒤 전체 배열에서 식사량, 맛의 강도, 온도, 질감, 조리 방식, 익숙함 중 관련 있는 식사 프로필을 최소 두 가지 만든다. 이 프로필은 후보 목록이 아니라 카드 의미를 음식으로 번역하는 중간 기준이다.
-- 한 카드의 편안함·회복·안정 의미를 한 가지 상투적인 메뉴로 바로 치환하지 않는다. 서로 다른 카드 신호를 조합해 질문에 적힌 끼니에 자연스러운 완성된 한 끼를 정한다.
-- 최근 같은 브라우저에서 나온 추천은 ${JSON.stringify(context?.recentRecommendations ?? [])}이다. 전체 카드 조합이 그 메뉴를 특별히 강하게 지지하지 않는 한 같은 메뉴를 반복하지 않는다.
-- 첫 문장은 질문을 설명하지 말고 추천 메뉴를 바로 말한다. 이후 문장은 적어도 두 개의 서로 다른 카드 근거가 그 메뉴의 맛·식사량·조리 방식과 어떻게 이어졌는지 설명한다.`
-    : "";
+- recommend_one의 axes는 공개 전 만들지 않은 대안들을 사후에 나열하지 않고, 카드 역할과 질문의 실제 판단 신호를 3~5개 축으로 표시한다.
+- 최근 같은 브라우저에서 나온 추천은 ${JSON.stringify(context?.recentRecommendations ?? [])}이다. 카드 조합이 특별히 강하게 지지하지 않는 한 같은 답을 반복하지 않는다.`;
   const prompt = `다음 질문과 카드로 종합 해석을 생성하라.
 현재 질문: ${JSON.stringify(question)}
 대화 맥락: ${JSON.stringify(context ?? null)}
 출력 언어: ${language === "ko" ? "한국어" : "English"}. JSON 키는 스키마 그대로 유지하고 모든 사용자 표시 문자열 값은 이 언어로 작성한다.
-질문 범위 지침: ${questionScopeGuide(guideQuestion, language)}
-문장 구체성 지침: ${concreteWritingGuide(guideQuestion, language)}
 ${contractGuide}
-${openFoodGuide}
 선택 카드와 참고 데이터: ${JSON.stringify(selectedData)}
 이전 결과의 연결 정보(문체를 모방하지 말 것): ${JSON.stringify(previousContext)}
 
 필수 JSON 필드:
 - verdict: answerContract를 실행한 직접 답이다. kind, value, statement를 모두 쓴다.
-- summary: verdict.statement를 철자 그대로 첫 문장에 놓고, 그 결론의 핵심 카드 근거를 이어서 총 2~3문장으로 쓴다. 카드 이름이나 키워드만 나열하지 않고 결론을 다시 흐리지 않는다.
-- cardInterpretations: 정확히 ${expectedCards.length}개이며 중복을 만들지 않는다. 다음 순서와 cardId, positionTitle, orientation 값을 그대로 사용한다: ${JSON.stringify(expectedCards.map(({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, sourceMeaning, evidence }) => ({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, sourceMeaning, evidence })))}.
+- summary: 화면에서 verdict.statement 바로 아래에 표시할 근거 설명만 1~2문장으로 쓴다. verdict.statement를 되풀이하거나 앞에 붙이지 않고, 카드 이름이나 키워드만 나열하지 않으며 결론을 다시 흐리지 않는다.
+- cardInterpretations: 정확히 ${expectedCards.length}개이며 중복을 만들지 않는다. 다음 순서와 cardId, positionTitle, orientation 값을 그대로 사용한다: ${JSON.stringify(expectedCards.map(({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, evidence }) => ({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, evidence })))}.
   - text: 먼저 읽히는 결론이다. 질문에 적용할 판단을 25~90자로 직접 쓴다.
-  - reasoning.sourceMeaning: 한국어에서는 빈 문자열을 쓰고, 영어에서는 위 카드의 coreMeaning과 sourceKeywords를 45~140자로 정확히 번역한다. 한국어 원뜻은 서버가 직접 넣는다.
+  - reasoning.sourceMeaning: 위 카드의 coreMeaning과 sourceKeywords를 바꾸지 말고 출력 언어의 자연스러운 문장으로 45~140자 안에서 설명한다.
   - reasoning.questionConnection: 왜 그 원뜻이 이 질문의 이 자리에 해당하는지 80~200자로 설명한다. positionTitle을 철자 그대로 쓰고 positionFocus와 연결되는 논리를 명시한다. 원뜻과 결론 사이를 건너뛰지 않는다.
   - reasoning.decisionImpact: 이 카드가 전체 결론을 지지하는지 반대하는지, 최종 답에 얼마나 강하게 작용하는지를 45~150자로 설명한다. 이미 내린 결론을 조건부로 다시 열지 않는다.
   - evidence는 서버가 위 카드 데이터에서 직접 넣으므로 JSON에 출력하지 않는다.
-- synthesis: 정확히 카드당 한 문장씩 ${expectedCards.length}문장으로 쓴다. 각 문장은 카드 이름으로 시작하고 그 카드가 결론을 뒷받침하는 이유를 질문의 말로 설명한다. 카드를 "식사를 한다/옷을 입는다" 같은 사람 행동의 주어로 쓰지 말고 "~을 우선하라는 근거가 된다/~에 무게를 둔다"처럼 쓴다. 카드 문장 뒤에 전체를 다시 요약하는 결론 문장을 추가하지 않는다.
-- guidance: 사용자가 실제로 확인하거나 실행할 수 있는 짧은 항목 2~4개. 카드 데이터의 genericCautionTheme 문장을 복사하지 않는다. recommend_one에서는 첫 문장의 메뉴명을 그대로 다시 추천하지 말고, 그 메뉴를 고른 카드 근거에서 나온 식사 방법이나 주의점만 쓴다.
+- synthesis: 정확히 카드당 한 문장씩 ${expectedCards.length}문장으로 쓴다. 각 문장은 카드 이름으로 시작하고 그 카드가 결론을 뒷받침하는 이유를 질문의 말로 설명한다. 카드를 사람처럼 행동하는 주어로 쓰지 말고, 카드가 어떤 판단의 근거가 되는지 쓴다. 카드 문장 뒤에 전체를 다시 요약하는 결론 문장을 추가하지 않는다.
+- guidance: 사용자가 실제로 확인하거나 실행할 수 있는 짧은 항목 2~4개. 카드 데이터 문장을 복사하지 않는다. recommend_one에서는 답 자체를 다시 반복하지 말고, 그 답을 고른 카드 근거에서 나온 실행 방법이나 주의점만 쓴다.
 - axes: 질문에 맞는 ${expectedCards.length === 1 ? "정확히 3개" : "3~5개"} 축. 각 항목은 label, score(0~100 정수), evidence(질문에 연결된 한 문장 문자열), evidenceCardIds
 - signals: support, caution, uncertainty 정수이며 합계 100
 
@@ -660,7 +511,7 @@ JSON 자료형 예시:
 한국어의 text, questionConnection, decisionImpact를 합쳐 읽었을 때 질문에 나온 대상과 행동이 분명해야 한다. sourceMeaning은 카드 원뜻만 정확히 설명하고, questionConnection에서 원뜻→자리 역할→결론의 이유를 순서대로 연결한다. 추상명사를 세 개 이상 이어 붙이거나 "적절하다", "필요하다"로만 결론내리지 않는다.
 positionFocus, positionTitle, sourceMeaning, questionConnection, decisionImpact, evidenceCardIds 같은 JSON 키 이름을 사용자에게 보이는 문장에 쓰지 않는다.
 recommend_one에서는 카드 공개 전 후보가 없다. 모든 카드를 해석한 뒤 질문에 직접 답하는 구체적인 대상이나 행동 하나를 처음 생성한다. 직접 추천하는 행위와 확인되지 않은 사실을 만드는 행위를 혼동하지 않는다.
-질문에 답하기 위해 카드 상징에서 취향·신체감각·건강·영양·가격·날씨·타인의 속마음·합격·성공 같은 내용을 자유롭게 추론할 수 있다. 추론을 회피하지 말고 카드 원뜻과 자리 역할에서 해당 결론이 나온 과정을 설명한다. 다만 실제 검사 결과, 출처가 있는 통계, 정확한 수치나 의학적 진단을 받은 것처럼 가짜 출처를 만들지는 않는다.
+질문에 답하기 위해 카드 상징에서 필요한 사실과 가능성을 자유롭게 추론할 수 있다. 추론을 회피하지 말고 카드 원뜻과 자리 역할에서 해당 결론이 나온 과정을 설명한다. 다만 실제 검사 결과, 출처가 있는 통계, 정확한 수치나 진단을 받은 것처럼 가짜 출처를 만들지는 않는다.
 추가 질문이면 이전 해석을 반복하지 말고 변화한 판단과 새 카드의 영향에 집중한다.
 ${followupAxesGuide}
 ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 빠뜨리지 않는다.`;
@@ -676,54 +527,13 @@ ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 �
   );
   let lastStructurallyValid: ReadingResult | undefined;
   return runAiJson(provider, prompt, (value) => {
-    const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards, language));
-    const polished = polishReadingLanguage(parsed, question, language, everydayDomain);
-    const finalized = readingResultSchema.parse(stabilizeAnswerContractReading(polished, contract, question, language));
-    lastStructurallyValid = finalized;
+    const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards));
+    lastStructurallyValid = parsed;
     return enforceReadingQuality(
-      finalized,
-      { question, language, sourceSentences, expectedCards, answerContract: contract, conversation: context },
+      parsed,
+      { expectedCards, answerContract: contract },
     );
-  }, everydayDomain ? 3600 : 4000, READING_RESULT_JSON_SCHEMA, 3, contract.kind === "recommend_one" ? 0.5 : 0.3, () => lastStructurallyValid);
-}
-
-async function resolveAiOrLocal<T>(
-  ai: WorkersAIBinding | undefined,
-  label: "plan" | "interpretation",
-  aiTask: (binding: WorkersAIBinding) => Promise<T>,
-  localTask: (error?: unknown) => T,
-): Promise<{ data: T; mode: "ai" | "local" }> {
-  if (!ai) return { data: localTask(), mode: "local" };
-  try {
-    return { data: await aiTask(ai), mode: "ai" };
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status < 500) throw error;
-    console.warn("[tarot-ai] using validated local fallback", { label, code: error.code });
-    try {
-      return { data: localTask(error), mode: "local" };
-    } catch (fallbackError) {
-      if (
-        ["DAILY_AI_LIMIT", "BACKUP_AI_RATE_LIMIT", "BACKUP_AI_UNAVAILABLE", "INVALID_AI_RESPONSE"].includes(error.code)
-        && fallbackError instanceof ApiError
-        && /^AI_.*_UNAVAILABLE$/.test(fallbackError.code)
-      ) {
-        throw error;
-      }
-      throw fallbackError;
-    }
-  }
-}
-
-function canUseInterpretationFallback(contract: AnswerContract): boolean {
-  return ["choose_one", "yes_no", "compare"].includes(contract.kind)
-    && contract.candidates.length >= 2;
-}
-
-export function canUsePlanFallback(contract: AnswerContract, error?: unknown): boolean {
-  if (canUseInterpretationFallback(contract)) return true;
-  return contract.kind === "recommend_one"
-    && error instanceof ApiError
-    && error.status >= 500;
+  }, cardsToInterpret.length <= 2 ? 3_200 : 4_000, READING_RESULT_JSON_SCHEMA, 3, 0.45, () => lastStructurallyValid);
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -737,56 +547,36 @@ export async function POST(request: Request): Promise<Response> {
     const runtimeEnv = env as unknown as RuntimeEnv;
     const countAsFollowup = input.action === "plan" && Boolean(input.followup);
     await consumeAiCall(request, runtimeEnv, countAsFollowup);
+    if (!runtimeEnv.AI) {
+      throw new ApiError(503, "AI_UNAVAILABLE", "AI 해석 서비스를 현재 사용할 수 없습니다. 잠시 후 다시 시도하세요.");
+    }
 
     if (input.action === "plan") {
-      const response = await resolveAiOrLocal(
+      const data = await createAiPlan(
         runtimeEnv.AI,
-        "plan",
-        (ai) => createAiPlan(
-          ai,
-          input.question,
-          input.followup,
-          input.language,
-          input.context,
-          runtimeEnv.GROQ_API_KEY,
-        ),
-        (planError) => {
-          const plan = readingPlanSchema.parse(designReading(input.question, input.followup, input.language, input.context));
-          if (!canUsePlanFallback(plan.answerContract, planError)) {
-            throw new ApiError(503, "AI_PLANNING_UNAVAILABLE", "질문에 맞는 카드 구성을 만들 AI를 현재 사용할 수 없습니다. 잠시 후 다시 시도하세요.");
-          }
-          return plan;
-        },
+        input.question,
+        input.followup,
+        input.language,
+        input.context,
+        runtimeEnv.GROQ_API_KEY,
       );
       if (countAsFollowup) {
         await completeFollowup(request, runtimeEnv, input.context?.previousQuestions?.length ?? 0);
       }
-      return Response.json(response, { headers: { "cache-control": "no-store" } });
+      return Response.json({ data, mode: "ai" }, { headers: { "cache-control": "no-store" } });
     }
 
-    const effectiveContract = input.answerContract
-      ?? createAnswerContract(input.question, input.context, input.language);
-    const response = await resolveAiOrLocal(
+    const data = await createAiInterpretation(
       runtimeEnv.AI,
-      "interpretation",
-      (ai) => createAiInterpretation(
-        ai,
-        input.question,
-        input.cards,
-        input.previous,
-        input.language,
-        effectiveContract,
-        input.context,
-        runtimeEnv.GROQ_API_KEY,
-      ),
-      () => {
-        if (!canUseInterpretationFallback(effectiveContract)) {
-          throw new ApiError(503, "AI_INTERPRETATION_UNAVAILABLE", "질문을 충분히 해석할 AI를 현재 사용할 수 없습니다. 잠시 후 다시 시도하세요.");
-        }
-        return readingResultSchema.parse(generateReadingResult(input.question, input.cards, input.previous, input.language, effectiveContract));
-      },
+      input.question,
+      input.cards,
+      input.previous,
+      input.language,
+      input.answerContract,
+      input.context,
+      runtimeEnv.GROQ_API_KEY,
     );
-    return Response.json(response, { headers: { "cache-control": "no-store" } });
+    return Response.json({ data, mode: "ai" }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return apiErrorResponse(error);
   }

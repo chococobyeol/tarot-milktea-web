@@ -43,14 +43,13 @@ liveDescribe("Groq quota fallback live check", () => {
       decisive: true,
     });
     expect(plan.cardCount).toBeGreaterThanOrEqual(1);
-    expect(plan.cardCount).toBeLessThanOrEqual(3);
+    expect(plan.cardCount).toBeLessThanOrEqual(5);
     expect(plan.positions).toHaveLength(plan.cardCount);
     expect(plan.positions.every((position) => !position.title.endsWith(" 선택"))).toBe(true);
     expect(reading.verdict?.kind).toBe("recommend_one");
     expect(reading.verdict?.value).not.toMatch(/^(?:메뉴|음식|적당한 것|상황에 맞는 선택)$/);
     expect(reading.cardInterpretations).toHaveLength(plan.cardCount);
     expect(reading.summary.startsWith(reading.verdict?.statement ?? "__missing__")).toBe(true);
-    expect(reading.guidance.join(" ")).toContain(reading.verdict?.value);
     expect(reading.signals.support + reading.signals.caution + reading.signals.uncertainty).toBe(100);
   }, 90_000);
 });

@@ -51,7 +51,6 @@ import {
 import {
   createRecordId,
   createSessionDeck,
-  generateReadingResult,
   getCard,
   MILK_TEA_IMAGE,
   orientationLabel,
@@ -170,10 +169,12 @@ function shuffledDeck(deck: DeckCard[]): DeckCard[] {
 
 function resultText(question: string, result: ReadingResult, language: AppLanguage): string {
   const t = UI_TEXT[language];
+  const summaryDetail = resultSummaryDetail(result);
   return [
     `[${language === "ko" ? "타로밀크티 웹" : "Tarot Milktea Web"}] ${question}`,
     "",
-    result.summary,
+    resultHeadline(result),
+    ...(summaryDetail ? [summaryDetail] : []),
     "",
     result.cardInterpretations.map((item) => {
       const card = getCard(item.cardId);
@@ -201,10 +202,19 @@ function resultHeadline(result: ReadingResult): string {
 }
 
 function resultSummaryDetail(result: ReadingResult): string {
-  const headline = resultHeadline(result);
+  if (!result.verdict?.statement.trim()) return "";
   const summary = result.summary.trim();
-  if (summary === headline) return "";
-  return summary.startsWith(headline) ? summary.slice(headline.length).trim() : summary;
+  const legacyHeadline = result.verdict.statement.trim();
+  if (!summary.startsWith(legacyHeadline)) return summary;
+
+  // Older saved readings stored the separately rendered headline at the start
+  // of summary. Remove only that duplicated display segment; new AI responses
+  // already return summary as an independent explanation.
+  let detail = summary.slice(legacyHeadline.length).trimStart();
+  if (detail.startsWith(".") || detail.startsWith("!") || detail.startsWith("?")) {
+    detail = detail.slice(1).trimStart();
+  }
+  return detail;
 }
 
 function userError(error: unknown, language: AppLanguage = "ko"): string {
@@ -220,22 +230,6 @@ function userError(error: unknown, language: AppLanguage = "ko"): string {
   }
   if (error instanceof Error) return error.message;
   return english ? "The request could not be processed. Try again." : "요청을 처리하지 못했습니다. 다시 시도하세요.";
-}
-
-function canUseLocalInterpretation(error: unknown): boolean {
-  if (error instanceof TarotApiError) {
-    return error.status === 0
-      || error.code === "REQUEST_TIMEOUT"
-      || error.code === "NETWORK_ERROR";
-  }
-  return false;
-}
-
-function canGenerateLocalReading(plan: ReadingPlan): boolean {
-  const contract = (plan as Partial<ReadingPlan>).answerContract;
-  return Boolean(contract
-    && ["choose_one", "yes_no", "compare"].includes(contract.kind)
-    && contract.candidates.length >= 2);
 }
 
 async function writeClipboard(text: string): Promise<void> {
@@ -839,24 +833,6 @@ export function TarotApp() {
       setPhase("revealing");
     } catch (requestError) {
       await minimumInterpretationTime;
-      if (
-        canUseLocalInterpretation(requestError)
-        && canGenerateLocalReading(activePlan)
-      ) {
-        const fallback = generateReadingResult(
-          activeQuestion,
-          allCards,
-          round > 0 ? result ?? undefined : undefined,
-          language,
-          activePlan.answerContract,
-        );
-        setApiMode("local");
-        setLatestCards(newCards);
-        setPendingResult(fallback);
-        setRevealCount(0);
-        setPhase("revealing");
-        return;
-      }
       if (requestError instanceof TarotApiError && requestError.status === 401) {
         setSessionRefreshNeeded(true);
       }

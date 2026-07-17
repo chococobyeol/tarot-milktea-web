@@ -122,7 +122,7 @@ const interpretRequestSchema = z.object({
   question: z.string().trim().min(4).max(1000),
   cards: z.array(selectedCardSchema).min(1).max(15),
   previous: readingResultSchema.optional(),
-  answerContract: answerContractSchema.optional(),
+  answerContract: answerContractSchema,
   context: readingContextSchema,
   language: z.enum(["ko", "en"]).optional().default("ko"),
 }).superRefine((input, context) => {
