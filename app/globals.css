@@ -2166,17 +2166,6 @@ img {
   font-size: 11px;
 }
 
-.console-footer {
-  padding: 8px 18px;
-  border-top: 1px solid #39393d;
-  color: #77777c;
-  font-size: 10px;
-}
-
-.console-footer p {
-  margin: 0;
-}
-
 .result-command-bar {
   position: absolute;
   z-index: 13;
@@ -3273,8 +3262,7 @@ textarea:focus-visible {
 .console-header,
 .console-tabs,
 .console-signal,
-.console-metrics,
-.console-footer {
+.console-metrics {
   border-color: #111;
 }
 
@@ -3289,7 +3277,6 @@ textarea:focus-visible {
 .evidence-chips span,
 .card-pager span,
 .console-metrics dd,
-.console-footer,
 .result-next-actions > span {
   color: var(--muted);
 }
@@ -3677,14 +3664,6 @@ textarea:focus-visible {
   margin: 4px 0 0;
   color: #62625d;
   font-size: 13px;
-}
-
-.reading-export-footer {
-  margin-top: 32px;
-  padding-top: 14px;
-  border-top: 1px solid #111;
-  color: #62625d;
-  font-size: 12px;
 }
 
 /* Final responsive alignment pass: keep navigation, stage and dialog on distinct rows. */

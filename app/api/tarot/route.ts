@@ -19,7 +19,6 @@ import {
   enforcePlanQuality,
   enforceReadingQuality,
   groundPositionConnection,
-  isPhysicalFoodPosition,
   polishReadingLanguage,
   questionScopeGuide,
   resolveEverydayDomain,
@@ -64,17 +63,15 @@ const SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
 - 한국어로 쓸 때는 주어와 행동이 드러나는 짧고 자연스러운 문장을 사용한다. 카드 키워드와 자리 이름을 추상명사로 나열하지 않는다.
 - 한국어 출력은 자연스러운 "-해요/-이에요" 해요체로 통일한다. "-한다/-이다"나 "-합니다/-입니다" 문체를 섞지 않는다.
 - 사용자가 요구한 답의 형태를 가장 먼저 지킨다. 하나를 골라 달라면 하나를 고르고, 추천해 달라면 구체적인 추천 하나를 말하고, 예측·조언·원인 설명을 요청하면 그 결론부터 말한다.
-- 직접 답해야 하는 질문에 조건이나 판단 기준만 나열하며 결론을 미루지 않는다. 한계와 예외는 직접 답한 뒤에 쓴다.
+- 직접 답해야 하는 질문에 조건이나 판단 기준만 나열하며 결론을 미루지 않는다. 직접 답한 뒤 카드 근거를 쓴다.
 - "서로 다른 측면", "요소가 상호작용한다", "균형 잡힌 고려", "분리를 통해 접근" 같은 내용 없는 문장을 쓰지 않는다.
 - 요약, 종합 해석, 확인할 점에서 같은 내용을 반복하지 않는다.
 - 카드별 sourceMeaning에서는 제공된 원뜻을 정확히 설명하고, 그 밖의 영역에서는 카드 데이터 문장을 그대로 복사하지 말고 질문에 맞는 실제 판단 기준이나 행동으로 바꿔 쓴다.
-- 카드 상징을 현실의 인과관계나 영양·건강상의 사실처럼 만들지 않는다.
-- 미래 사건, 합격, 성공, 상대의 감정을 확률이나 사실로 단정하지 않는다.
-- 수치는 통계 확률이 아닌 AI 해석 지표다.
-- 의료·법률·금융 전문 판단을 대신하지 않는다.
+- 카드 상징에서 읽히는 취향, 맛, 포만감, 영양, 몸 상태, 날씨, 상대의 감정, 성공·실패와 미래 흐름을 질문에 맞게 자유롭게 추론한다.
+- 결과를 묻는 질문은 "성공할 가능성이 높아요", "이번에는 실패할 거예요", "합격 쪽이에요"처럼 카드 배열이 가리키는 한쪽을 첫 문장에서 분명히 말한다. 불확실성이나 현실 확인 사항을 이유로 결론을 취소하지 않는다.
+- 숫자는 화면의 AI 해석 지표로만 작성한다. 검사 결과, 실제 통계, 정확한 확률이나 의학적 진단을 받은 것처럼 출처를 꾸며내지만 않는다.
 - 제공된 카드 의미 데이터의 범위를 벗어난 의미를 확정적으로 추가하지 않는다.
-- 카드 상징은 사용자의 판단 방식과 주의점을 해석할 뿐, 음식의 포만감·영양, 날씨, 건강처럼 측정 가능한 현실 속성을 예측하지 못한다. 이런 자리에서는 속성을 단정하지 말고 사용자가 확인할 현실 정보와 판단상의 주의점을 구분한다.
-- 열린 추천 요청에서는 카드 공개 전 후보를 만들거나 범위를 임의로 좁히지 않는다. 모든 카드를 해석한 뒤 질문에 맞는 구체적인 답 하나를 처음 제안하되, 그 답의 맛·영양·효과·가격·상대 감정처럼 확인되지 않은 현실 속성을 추천 근거로 만들어내지 않는다.
+- 열린 추천 요청에서는 카드 공개 전 후보를 만들거나 범위를 임의로 좁히지 않는다. 모든 카드를 해석한 뒤 질문에 맞는 구체적인 답 하나를 처음 제안하고, 카드 의미가 그 답의 맛·분위기·효과·감정과 어떻게 이어지는지 구체적으로 설명한다.
 - 반드시 JSON 객체만 출력한다.`;
 
 function extractResponseText(result: unknown): string {
@@ -125,7 +122,6 @@ function parseJsonText(text: string): unknown {
 function normalizeReadingShape(
   value: unknown,
   expectedCards: ExpectedInterpretation[],
-  everydayDomain: ReturnType<typeof detectEverydayDomain>,
   language: ReadingLanguage,
 ): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -204,39 +200,16 @@ function normalizeReadingShape(
         };
       })
     : record.axes;
-  const physicalFoodCard = language === "ko"
-    && everydayDomain === "food"
-    && expectedCards.length === 1
-    && isPhysicalFoodPosition(expectedCards[0].positionTitle, expectedCards[0].positionFocus)
-    ? expectedCards[0]
-    : null;
-  const axes = physicalFoodCard && Array.isArray(normalizedAxes) && normalizedAxes.length === 2
-    ? [
-      ...normalizedAxes,
-      {
-        label: "식사량 확인",
-        score: Math.round(normalizedAxes.reduce((sum, item) => {
-          if (!item || typeof item !== "object" || Array.isArray(item)) return sum + 50;
-          const score = (item as Record<string, unknown>).score;
-          return sum + (typeof score === "number" && Number.isFinite(score) ? score : 50);
-        }, 0) / 2),
-        evidence: "타로 카드는 실제 포만감을 알 수 없으므로 현재 배고픔과 사용자가 이미 아는 식사량을 직접 확인한다.",
-        evidenceCardIds: [physicalFoodCard.cardId],
-      },
-    ]
-    : normalizedAxes;
-
   return {
     ...record,
     cardInterpretations,
-    axes,
+    axes: normalizedAxes,
   };
 }
 
 export function stabilizeAnswerContractReading(
   result: ReadingResult,
   contract: AnswerContract,
-  language: ReadingLanguage,
 ): ReadingResult {
   const verdict = result.verdict;
   if (!verdict) return result;
@@ -244,6 +217,7 @@ export function stabilizeAnswerContractReading(
     ? result.summary
     : `${verdict.statement.trim()} ${result.summary.trim()}`;
   if (!contract.decisive) return { ...result, summary };
+  if (contract.kind === "outcome") return { ...result, summary };
   const normalizedStatement = verdict.statement.toLowerCase().replace(/[^0-9a-z가-힣]/g, "");
   const guidanceAlreadyActsOnVerdict = result.guidance.some((item) => (
     item.toLowerCase().replace(/[^0-9a-z가-힣]/g, "").includes(normalizedStatement)
@@ -259,9 +233,6 @@ export function stabilizeAnswerContractReading(
       : [
         verdict.statement,
         ...result.guidance,
-        language === "ko"
-          ? "확인 가능한 현실 조건이 결론과 충돌할 때만 조정해요."
-          : "Adjust only when a verifiable real-world constraint conflicts with the answer.",
       ].slice(0, 4),
   };
 }
@@ -400,12 +371,13 @@ export async function createAiPlan(
 - choose_one: 사용자가 제시한 후보 중 하나를 골라 달라는 요청. candidates에는 질문의 후보를 철자 그대로 2~5개 넣고 decisive=true.
 - recommend_one: 정해진 후보 없이 구체적인 대상이나 행동 하나를 추천해 달라는 요청. candidates는 반드시 빈 배열이고 decisive=true다. 카드 공개 전에는 내부적으로도 후보 목록을 만들지 않는다. 카드를 모두 해석한 뒤에만 질문의 제약 안에서 구체적인 답 하나를 생성한다.
 - yes_no: 해야 하는지, 가능한지처럼 예/아니요 방향을 요청. 출력 언어의 예/아니요 후보 2개와 decisive=true.
+- outcome: 성공·실패, 합격·불합격, 성사 여부처럼 사건의 결과를 묻는 질문. candidates는 빈 배열이고 decisive=true다. 카드 수와 역할은 질문의 복잡도에 따라 정한다.
 - compare: 후보의 차이만 비교하고 선택까지 요구하지 않는 질문. 질문에 나온 후보를 candidates에 넣고 decisive=false.
 - forecast: 시기, 가능성, 향후 흐름을 묻는 질문.
 - advice: 무엇을 하거나 어떻게 대응할지 먼저 할 행동을 묻는 질문이며 decisive=true.
 - explain: 이유나 원인을 묻는 질문이며 decisive=false.
 - analysis: 위 유형이 아닌 상태·관계·의미 분석 질문이며 decisive=false.
-decisive는 choose_one, recommend_one, yes_no, advice에서만 true이고 compare, forecast, explain, analysis에서는 false이다.
+decisive는 choose_one, recommend_one, yes_no, outcome, advice에서 true이고 compare, forecast, explain, analysis에서는 false이다.
 후속 질문이 "그래서", "결국", "정확히", "어느 쪽"처럼 앞선 결론을 가리키면 대화 맥락의 previousContract와 원 질문을 이어서 해석한다. 사용자가 직접 제시한 후보만 이어받을 수 있으며, recommend_one에는 이전 후보를 상속하지 않는다. 새 대상을 묻는 질문이면 이전 후보를 상속하지 않는다.
 answerContract.subject에는 지금 답해야 할 대상을 현재 질문의 핵심 명사를 직접 사용해 한 문장으로 적고, candidates가 필요 없는 유형은 빈 배열을 쓴다.
 
@@ -414,14 +386,14 @@ choose_one, yes_no, compare는 후보마다 카드 한 장을 배정하므로 ca
 recommend_one은 후보별 자리를 만들지 않는다. 질문에 맞는 해석 역할 1~5개를 만들고, 짧은 일상 추천에는 보통 2~3장을 사용한다. 각 title은 짧고 서로 다른 역할이어야 하며, 질문의 핵심 대상이나 행동을 직접 포함한다. "샌드위치 선택", "요거트 선택"처럼 카드 공개 전 구체 후보를 position에 넣지 않는다. interpretationFrame과 selectionGuide에도 후보 이름을 쓰지 않는다.
 한국어 title은 전체 질문을 반복하지 않는 4~12자의 자연스러운 UI 라벨로 쓴다. "아침 식사 선택의 행동", "메뉴의 특징"처럼 설문 항목 같은 표현을 피하고, 질문에 맞춰 "메뉴 신호", "주의할 흐름", "최종 메뉴 단서"처럼 역할이 바로 읽히게 쓴다. 이 예시를 고정 복사하지 말고 질문마다 필요한 역할을 정한다.
 자리 역할은 질문에 실제로 답하는 구체적인 비교 기준으로 작성한다. title마다 현재 질문의 핵심 명사나 행동을 직접 넣는다. "방향성", "외부 조건", "실행 가능성", "현재 상황", "현재 상태", "핵심 기준", "선택 기준", "조정 방향"처럼 어느 질문에나 붙일 수 있는 제목은 사용하지 않는다.
-짧은 일상 질문에서는 질문에 실제로 나온 대상과 행동을 중심으로 쓴다. 질문에 없는 현실 속성을 새 비교 기준으로 만들지 않는다.
+짧은 일상 질문에서는 질문에 실제로 나온 대상과 행동을 중심으로 쓴다. 질문에 직접 나오지 않은 맛·취향·감정·몸 상태·예상 결과도 카드 상징에서 읽히면 구체적인 해석 기준으로 사용할 수 있다.
 응답 JSON 스키마:
 {
   "cardCount": 1~5 정수,
   "interpretationFrame": "이번 리딩이 분석할 기준",
   "selectionGuide": "카드 선택 안내 한 문장",
   "positions": [{ "id": "고유 영문 ID", "title": "자리 이름", "focus": "이 자리가 살펴볼 관점" }],
-  "answerContract": { "kind": "choose_one|recommend_one|yes_no|compare|forecast|advice|explain|analysis", "subject": "직접 답할 대상", "candidates": [], "decisive": true }
+  "answerContract": { "kind": "choose_one|recommend_one|yes_no|outcome|compare|forecast|advice|explain|analysis", "subject": "직접 답할 대상", "candidates": [], "decisive": true }
 }
 answerContract 예시:
 - 열린 추천: { "kind": "recommend_one", "subject": "오늘 먹을 메뉴 하나", "candidates": [], "decisive": true }
@@ -487,17 +459,6 @@ export async function createAiInterpretation(
   const selectedData = cardsToInterpret.map((selected) => {
     const card = getCard(selected.cardId);
     const meaning = card[selected.reversed ? "reversed" : "upright"];
-    const applicationBoundaries: string[] = [];
-    if (everydayDomain === "schedule") {
-      applicationBoundaries.push(language === "ko"
-        ? "카드 원뜻의 장기 목표·장기 회복·안정성은 카드 원뜻 설명에만 남긴다. 적용 문장에서는 오늘 할 일의 순서, 마감, 착수, 일정 정비로 범위를 줄인다. 급한 일보다 먼 미래의 목표를 우선하라고 결론내리지 않는다."
-        : "Keep long-term goals, recovery, and stability only in the card's source meaning. In applied prose, narrow them to today's task order, deadlines, starting criteria, and schedule cleanup. Do not prioritize distant goals over today's urgent work.");
-    }
-    if (everydayDomain === "food" && isPhysicalFoodPosition(selected.positionTitle, selected.positionFocus)) {
-      applicationBoundaries.push(language === "ko"
-        ? "카드 원뜻은 먹기 전 메뉴 선택 과정에만 적용한다. 카드의 감정·기분 의미를 식사 후 만족감, 포만감, 영양, 소화의 실제 결과로 바꾸지 않는다. 타로 카드만으로 실제 포만감을 알 수 없다고 명시하고 현재 배고픔과 사용자가 이미 아는 식사량을 직접 확인하게 한다."
-        : "Apply the card only to the pre-meal decision process. Do not turn emotions or symbolism into claims about post-meal satisfaction, physical fullness, nutrition, or digestion. State that tarot cannot determine physical outcomes and direct the user to information they can verify.");
-    }
     return {
       selected: {
         positionId: selected.positionId,
@@ -505,9 +466,6 @@ export async function createAiInterpretation(
         positionFocus: selected.positionFocus,
         orientation: selected.reversed ? "reversed" : "upright",
         orientationLabel: orientationLabel(selected.reversed, language),
-        ...(applicationBoundaries.length > 0
-          ? { applicationBoundary: applicationBoundaries.join(" ") }
-          : {}),
       },
       card: {
         id: card.id,
@@ -556,17 +514,15 @@ export async function createAiInterpretation(
   const contractGuide = `답변 계약: ${JSON.stringify(contract)}
 - verdict.kind는 answerContract.kind와 같아야 한다.
 - verdict.value에는 질문에 대한 실제 답만 짧게 쓴다. 판단 기준, 질문 재진술, "적당한 것", "상황에 맞는 선택" 같은 범주 표현을 답으로 쓰지 않는다.
-- verdict.statement는 verdict.value를 포함한 완결된 직접 답변 한 문장이다. answerContract.subject 또는 현재 질문의 핵심 대상을 문장 안에 직접 밝혀, 다른 질문에도 그대로 붙일 수 있거나 엉뚱한 답이 되지 않게 한다. summary는 이 문장으로 시작한 뒤 카드 근거와 한계를 설명한다.
+- verdict.statement는 verdict.value를 포함한 완결된 직접 답변 한 문장이다. answerContract.subject 또는 현재 질문의 핵심 대상을 문장 안에 직접 밝혀, 다른 질문에도 그대로 붙일 수 있거나 엉뚱한 답이 되지 않게 한다. summary는 이 문장으로 시작한 뒤 카드 근거를 설명한다.
 - choose_one과 yes_no에서는 candidates 중 정확히 하나를 verdict.value로 고른다. 둘 이상을 합치거나 후보 밖 답을 만들지 않는다.
+- outcome에서는 카드가 가리키는 결과 한쪽을 verdict.value에 짧게 쓴다. "성공", "실패", "합격", "불합격", "연락이 옴"처럼 질문의 결과어를 사용하고, verdict.statement에서 "이번 강화는 성공할 가능성이 높아요" 또는 "이번에는 실패할 거예요"처럼 바로 답한다.
 - recommend_one에서는 candidates가 비어 있다. 모든 카드의 역할과 의미를 해석한 뒤, 질문만으로는 정해지지 않았던 구체적인 대상이나 행동 하나를 verdict.value로 새로 만든다. 범주나 판단 기준이 아니라 사용자가 그대로 선택·실행할 수 있는 이름을 답하고, 둘 이상의 대안을 함께 말하지 않는다. verdict.value는 "샌드위치", "김치찌개", "검은 셔츠"처럼 설명절이나 조건을 떼어 낸 짧은 이름만 쓰고, 한국어 기준 28자를 넘기지 않는다.
-- 식사 recommend_one에서 메뉴 이름이나 카드 상징에 맞춘 맛·형태를 제안하는 것은 허용된다. 다만 사용자의 실제 취향·건강·포만감·영양 상태를 카드가 알아냈다고 쓰거나, 그 속성을 객관적 사실처럼 추천 근거로 단정하지 않는다. 질문에 직접 나오지 않았다면 단백질·탄수화물·칼로리·활동량·과식 같은 건강·영양·신체 추정 표현은 출력 전체에서 사용하지 않는다.
-- 질문에 없는 "익숙한/새로운"은 사용자의 실제 경험을 안다는 뜻으로 쓰지 않는다. 카드 상징의 방향을 설명할 필요가 있을 때만 쓰고, 친숙하거나 새롭기 때문에 객관적으로 더 좋다고 주장하지 않는다.
-- 질문에 사용자가 직접 말하지 않았다면 "평소에 자주 먹던", "늘 하던", "시도하지 않았던"처럼 사용자의 과거 행동이나 경험을 안다고 쓰지 않는다.
+- 카드 상징을 바탕으로 맛·취향·친숙함·새로움·포만감·영양·몸 상태·상대 감정·미래 결과를 자유롭게 추정하고, 그 추정이 카드의 어떤 원뜻과 자리에서 나온 것인지 설명한다.
 - compare는 핵심 차이를, forecast는 가장 가능성이 큰 방향이나 시기를, advice는 먼저 할 행동을, explain은 중심 원인을, analysis는 가장 중요한 발견을 verdict.value에 직접 쓴다.
 - explain의 statement는 "중심 원인은 …", forecast는 "예상 시기/가장 가능성이 큰 흐름은 …", advice는 "먼저 할 행동은 …", analysis는 "핵심은 …"처럼 답의 유형이 실제로 충족됐는지 첫 문장만 읽어도 알 수 있게 쓴다. 질문을 다시 말하거나 "살펴본다/확인한다"로 끝내지 않는다.
-- decisive=true이면 "상황에 따라", "조건을 더 확인", "판단하기 어렵다", "둘 다"로 답을 미루지 않는다. 확인 사항과 예외는 verdict.statement 뒤에 쓴다.
-- 추천이나 선택 자체는 허용되지만, 카드만으로 후보의 맛·영양·효과·가격·타인의 감정·미래 사실을 안다고 주장하지 않는다.
-- 후보 비교형(choose_one, yes_no, compare)에서는 카드 의미를 "이 후보를 선택하는 판단에 지지/주의를 더하는 상징 신호"로만 연결한다. 후보 자체가 감정·성격·효과·결과를 가진 것처럼 쓰거나, 사용자가 말하지 않은 준비 상태·환경·경험을 예측하지 않는다.
+- decisive=true이면 "상황에 따라", "조건을 더 확인", "판단하기 어렵다", "둘 다"로 답을 미루지 않는다. 카드가 강한 주의 신호를 보이더라도 그 신호를 결론의 이유로 설명하고 답을 다시 열지 않는다.
+- 후보 비교형(choose_one, yes_no, compare)에서도 카드 의미를 후보의 맛·분위기·효과·감정·예상 결과와 구체적으로 연결할 수 있다. 각 추정은 해당 후보 자리에 놓인 카드 원뜻을 근거로 설명한다.
 - 후보 비교형 axes는 후보마다 하나씩 만들고 각 label을 해당 후보 이름으로 시작한다. 후보가 2개라서 최소 3개 축이 필요할 때는 선택이면 "결론 선명도", compare이면 "비교 선명도" 축 하나만 추가한다. 질문에 없는 별도 평가 속성을 축으로 만들지 않는다.
 - recommend_one의 axes는 공개 전 만들지 않은 대안들을 사후에 나열하지 않는다. 카드 역할과 질문의 실제 판단 신호를 3~5개 축으로 표시하고, 특정 후보 간 비교인 것처럼 꾸미지 않는다.`;
   const prompt = `다음 질문과 카드로 종합 해석을 생성하라.
@@ -579,22 +535,19 @@ ${contractGuide}
 선택 카드와 참고 데이터: ${JSON.stringify(selectedData)}
 이전 결과의 연결 정보(문체를 모방하지 말 것): ${JSON.stringify(previousContext)}
 
-선택 카드의 selected.applicationBoundary가 있으면 해당 경계를 카드별 해석, 종합, 확인 항목, 그래프 축 전체에 반드시 적용한다.
-
 필수 JSON 필드:
 - verdict: answerContract를 실행한 직접 답이다. kind, value, statement를 모두 쓴다.
-- summary: verdict.statement를 철자 그대로 첫 문장에 놓고, 그 결론의 핵심 카드 근거와 한계를 이어서 총 2~3문장으로 쓴다. 카드 이름이나 키워드만 나열하지 않는다.
+- summary: verdict.statement를 철자 그대로 첫 문장에 놓고, 그 결론의 핵심 카드 근거를 이어서 총 2~3문장으로 쓴다. 카드 이름이나 키워드만 나열하지 않고 결론을 다시 흐리지 않는다.
 - cardInterpretations: 정확히 ${expectedCards.length}개이며 중복을 만들지 않는다. 다음 순서와 cardId, positionTitle, orientation 값을 그대로 사용한다: ${JSON.stringify(expectedCards.map(({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, sourceMeaning, evidence }) => ({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, sourceMeaning, evidence })))}.
   - text: 먼저 읽히는 결론이다. 질문에 적용할 판단을 25~90자로 직접 쓴다.
   - reasoning.sourceMeaning: 한국어에서는 위 카드 목록에 제공된 sourceMeaning 문자열을 그대로 쓴다. 서버에서도 이 값을 카드 데이터로 고정한다. 영어에서는 coreMeaning과 sourceKeywords를 정확히 번역해 45~140자로 설명한다. 아직 질문 분야의 메뉴·옷·일정에 적용하지 않는다.
   - reasoning.questionConnection: 왜 그 원뜻이 이 질문의 이 자리에 해당하는지 80~200자로 설명한다. positionTitle을 철자 그대로 쓰고 positionFocus와 연결되는 논리를 명시한다. 원뜻과 결론 사이를 건너뛰지 않는다.
-  - reasoning.decisionImpact: 이 카드가 전체 판단을 지지하는지, 주의를 더하는지, 보류하게 하는지와 예외를 45~150자로 설명한다. 카드가 특정 메뉴나 선택을 무조건 금지한다고 단정하지 않는다.
+  - reasoning.decisionImpact: 이 카드가 전체 결론을 지지하는지 반대하는지, 최종 답에 얼마나 강하게 작용하는지를 45~150자로 설명한다. 이미 내린 결론을 조건부로 다시 열지 않는다.
   - evidence: AI가 새 주장을 만들지 말고 위 목록에 지정된 evidence 문자열을 그대로 사용한다.
 - synthesis: 정확히 카드당 한 문장씩 ${expectedCards.length}문장으로 쓴다. 각 문장은 카드 이름으로 시작하고 그 카드가 결론을 뒷받침하는 이유를 질문의 말로 설명한다. 카드를 "식사를 한다/옷을 입는다" 같은 사람 행동의 주어로 쓰지 말고 "~을 우선하라는 근거가 된다/~에 무게를 둔다"처럼 쓴다. 카드 문장 뒤에 전체를 다시 요약하는 결론 문장을 추가하지 않는다.
 - guidance: 사용자가 실제로 확인하거나 실행할 수 있는 짧은 항목 2~4개. 카드 데이터의 genericCautionTheme 문장을 복사하지 않는다.
 - axes: 질문에 맞는 ${expectedCards.length === 1 ? "정확히 3개" : "3~5개"} 축. 각 항목은 label, score(0~100 정수), evidence(질문에 연결된 한 문장 문자열), evidenceCardIds
 - signals: support, caution, uncertainty 정수이며 합계 100
-- limitation: 확률이나 확정 예측이 아니라는 한계
 
 JSON 자료형 예시:
 {
@@ -604,15 +557,13 @@ JSON 자료형 예시:
   "synthesis": "문자열",
   "guidance": ["문자열", "문자열"],
   "axes": [{ "label": "문자열", "score": 50, "evidence": "배열이 아닌 한 문장 문자열", "evidenceCardIds": ["카드 ID"] }],
-  "signals": { "support": 50, "caution": 30, "uncertainty": 20 },
-  "limitation": "문자열"
+  "signals": { "support": 50, "caution": 30, "uncertainty": 20 }
 }
 
 한국어의 text, questionConnection, decisionImpact를 합쳐 읽었을 때 질문에 나온 대상과 행동이 분명해야 한다. sourceMeaning은 카드 원뜻만 정확히 설명하고, questionConnection에서 원뜻→자리 역할→결론의 이유를 순서대로 연결한다. 추상명사를 세 개 이상 이어 붙이거나 "적절하다", "필요하다"로만 결론내리지 않는다.
 positionFocus, positionTitle, sourceMeaning, questionConnection, decisionImpact, evidenceCardIds 같은 JSON 키 이름을 사용자에게 보이는 문장에 쓰지 않는다.
 recommend_one에서는 카드 공개 전 후보가 없다. 모든 카드를 해석한 뒤 질문에 직접 답하는 구체적인 대상이나 행동 하나를 처음 생성한다. 직접 추천하는 행위와 확인되지 않은 사실을 만드는 행위를 혼동하지 않는다.
-질문이나 대화 맥락에 없는 현실 정보는 카드 근거로 새로 만들지 않는다. 특히 신체 상태, 건강·영양, 가격, 날씨, 타인의 속마음, 합격·성공 같은 외부 사실은 사용자가 직접 확인할 정보와 타로 해석을 구분한다.
-질문에 없는 속성을 이유로 특정 후보가 객관적으로 더 낫다고 주장하지 않는다. 카드의 의미는 후보를 비교하는 타로 신호나 사용자의 판단 방식으로 설명한다.
+질문에 답하기 위해 카드 상징에서 취향·신체감각·건강·영양·가격·날씨·타인의 속마음·합격·성공 같은 내용을 자유롭게 추론할 수 있다. 추론을 회피하지 말고 카드 원뜻과 자리 역할에서 해당 결론이 나온 과정을 설명한다. 다만 실제 검사 결과, 출처가 있는 통계, 정확한 수치나 의학적 진단을 받은 것처럼 가짜 출처를 만들지는 않는다.
 추가 질문이면 이전 해석을 반복하지 말고 변화한 판단과 새 카드의 영향에 집중한다.
 ${followupAxesGuide}
 ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 빠뜨리지 않는다.`;
@@ -627,9 +578,9 @@ ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 �
     true,
   );
   return runAiJson(provider, prompt, (value) => {
-    const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards, everydayDomain, language));
+    const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards, language));
     const polished = polishReadingLanguage(parsed, question, language, everydayDomain);
-    const finalized = readingResultSchema.parse(stabilizeAnswerContractReading(polished, contract, language));
+    const finalized = readingResultSchema.parse(stabilizeAnswerContractReading(polished, contract));
     return enforceReadingQuality(
       finalized,
       { question, language, sourceSentences, expectedCards, answerContract: contract, conversation: context },

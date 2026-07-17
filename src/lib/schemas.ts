@@ -10,6 +10,7 @@ export const answerKindSchema = z.enum([
   "choose_one",
   "recommend_one",
   "yes_no",
+  "outcome",
   "compare",
   "forecast",
   "advice",
@@ -23,7 +24,7 @@ export const answerContractSchema = z.object({
   candidates: z.array(z.string().trim().min(1).max(80)).max(5),
   decisive: z.boolean(),
 }).superRefine((contract, context) => {
-  const decisiveKinds = new Set(["choose_one", "recommend_one", "yes_no", "advice"]);
+  const decisiveKinds = new Set(["choose_one", "recommend_one", "yes_no", "outcome", "advice"]);
   if (contract.decisive !== decisiveKinds.has(contract.kind)) {
     context.addIssue({ code: "custom", message: "답변 유형과 직접 결론 여부가 일치하지 않습니다.", path: ["decisive"] });
   }
@@ -105,7 +106,6 @@ export const readingResultSchema = z.object({
       context.addIssue({ code: "custom", message: "신호 분포의 합은 100이어야 합니다." });
     }
   }),
-  limitation: z.string().min(1).max(600),
 });
 
 const planRequestSchema = z.object({

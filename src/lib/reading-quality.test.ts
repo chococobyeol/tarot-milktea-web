@@ -56,7 +56,6 @@ const baseResult: ReadingResult = {
     { label: "피로 부담", score: 40, evidence: "복잡한 준비는 피하는 편이 낫다.", evidenceCardIds: ["major-07"] },
   ],
   signals: { support: 58, caution: 24, uncertainty: 18 },
-  limitation: "이 수치는 카드 관계를 비교하기 위한 해석 지표이며 실제 영양 평가가 아니다.",
 };
 
 const expectedCards = [
@@ -129,7 +128,6 @@ const cupsKnightResult: ReadingResult = {
     { label: "메뉴 유연성", score: 54, evidence: "새 메뉴 자체를 배제하는 신호는 아니다.", evidenceCardIds: ["cups-knight"] },
   ],
   signals: { support: 38, caution: 42, uncertainty: 20 },
-  limitation: "이 해석은 카드 상징을 식사 판단 기준으로 연결한 것이며 실제 영양이나 포만감을 예측하지 않는다.",
 };
 
 const scheduleExpected = [{
@@ -166,7 +164,6 @@ const scheduleResult: ReadingResult = {
     { label: "착수 난도", score: 54, evidence: "바로 시작할 수 있는 첫 행동을 정한다.", evidenceCardIds: ["major-07"] },
   ],
   signals: { support: 62, caution: 23, uncertainty: 15 },
-  limitation: "이 수치는 오늘 일정의 우선순위를 비교하는 해석 지표이며 실제 결과를 보장하지 않는다.",
 };
 
 describe("enforceReadingQuality", () => {
@@ -239,6 +236,19 @@ describe("enforceReadingQuality", () => {
       question: "아침 뭐 먹을까?",
       language: "ko",
     })).toThrow(/카드 공개 전에 후보/);
+
+    expect(() => enforcePlanQuality({
+      ...plan,
+      cardCount: 3,
+      positions: [
+        { id: "sandwich", title: "샌드위치", focus: "아침 메뉴를 살펴봐요." },
+        { id: "yogurt", title: "요거트", focus: "아침 메뉴를 살펴봐요." },
+        { id: "egg", title: "계란 요리", focus: "아침 메뉴를 살펴봐요." },
+      ],
+    }, {
+      question: "아침 뭐 먹을까?",
+      language: "ko",
+    })).toThrow(/해석할 역할/);
 
     const explanationPlan = enforcePlanQuality({
       cardCount: 2,
@@ -339,7 +349,7 @@ describe("enforceReadingQuality", () => {
     })).toThrow(/답변 유형은 explain/);
   });
 
-  it("replaces invented physical criteria with candidate signal positions", () => {
+  it("accepts physical criteria in the AI plan and normalizes explicit candidate positions", () => {
     const plan = enforcePlanQuality({
       cardCount: 2,
       interpretationFrame: "김치찌개와 애호박찌개를 비교해요.",
@@ -479,7 +489,6 @@ describe("enforceReadingQuality", () => {
         { label: "선택 유지", score: 64, evidence: "정한 메뉴를 다시 열지 않는 신호예요.", evidenceCardIds: ["wands-09"] },
       ],
       signals: { support: 61, caution: 22, uncertainty: 17 },
-      limitation: "이 추천은 카드 상징을 메뉴 선택에 적용한 해석이며 실제 맛이나 영양을 예측하지 않아요.",
     };
 
     expect(enforceReadingQuality(result, {
@@ -501,34 +510,27 @@ describe("enforceReadingQuality", () => {
       answerContract,
     })).toBe(symbolicFlavorRecommendation);
 
-    const inventedNutritionRecommendation: ReadingResult = {
+    const nutritionRecommendation: ReadingResult = {
       ...result,
       guidance: ["오늘 아침에는 김치찌개를 먹어요.", "단백질과 활동량에 맞는 메뉴예요."],
     };
-    expect(() => enforceReadingQuality(inventedNutritionRecommendation, {
+    expect(enforceReadingQuality(nutritionRecommendation, {
       question: "오늘 뭐 먹을까?",
       language: "ko",
       sourceSentences: [],
       answerContract,
-    })).toThrow(/질문에 없는 음식 특성/);
+    })).toBe(nutritionRecommendation);
 
-    const inventedCandidateFact: ReadingResult = {
+    const inferredCandidateFact: ReadingResult = {
       ...result,
       synthesis: `${result.synthesis} 김치찌개는 익숙한 메뉴라서 더 안정적이에요.`,
     };
-    expect(() => enforceReadingQuality(inventedCandidateFact, {
+    expect(enforceReadingQuality(inferredCandidateFact, {
       question: "오늘 뭐 먹을까?",
       language: "ko",
       sourceSentences: [],
       answerContract,
-    })).toThrow(/친숙함·새로움/);
-
-    expect(() => enforceReadingQuality(inventedCandidateFact, {
-      question: "김치찌개, 비빔밥, 우동 중 하나 골라줘",
-      language: "ko",
-      sourceSentences: [],
-      answerContract,
-    })).toThrow(/친숙함·새로움/);
+    })).toBe(inferredCandidateFact);
   });
 
   it("rejects criteria-only, out-of-contract, and multi-answer recommendations", () => {
@@ -562,7 +564,7 @@ describe("enforceReadingQuality", () => {
       answerContract,
     })).toThrow(/구체적인 답/);
 
-    for (const vagueCategory of ["따뜻한 국물 요리", "간단한 한식", "가벼운 아침"]) {
+    for (const vagueCategory of ["따뜻한 국물 요리", "간단한 한식", "가벼운 아침", "닭고기 요리", "채소 요리"]) {
       const categoryOnly: ReadingResult = {
         ...baseResult,
         verdict: { kind: "recommend_one", value: vagueCategory, statement: `오늘 메뉴는 ${vagueCategory}예요.` },
@@ -632,6 +634,17 @@ describe("enforceReadingQuality", () => {
       sourceSentences: [],
       answerContract,
     })).toThrow(/다른 대안/);
+
+    const unlinkedAlternative: ReadingResult = {
+      ...reopenedAlternative,
+      guidance: ["김치찌개를 먹어요.", "비빔밥도 괜찮아요."],
+    };
+    expect(() => enforceReadingQuality(unlinkedAlternative, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/대안을 덧붙이지/);
   });
 
   it("rejects a generic non-candidate verdict that could answer any question", () => {
@@ -764,6 +777,98 @@ describe("enforceReadingQuality", () => {
         decisive: false,
       },
     })).toBe(explanation);
+  });
+
+  it.each([
+    ["성공", "이번 강화는 성공할 가능성이 높아요."],
+    ["실패", "이번 강화는 실패할 가능성이 높아요."],
+  ])("accepts the direct outcome %s without a hedge", (value, statement) => {
+    const outcomeResult = polishReadingLanguage({
+      ...baseResult,
+      verdict: { kind: "outcome", value, statement },
+      summary: `${statement} 전차의 추진 신호가 강화 결과를 한쪽으로 강하게 기울여요.`,
+    }, "강화에 성공할까?", "ko");
+
+    expect(enforceReadingQuality(outcomeResult, {
+      question: "강화에 성공할까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract: {
+        kind: "outcome",
+        subject: "강화 성공 여부",
+        candidates: [],
+        decisive: true,
+      },
+    })).toBe(outcomeResult);
+  });
+
+  it("rejects an outcome that refuses to choose success or failure", () => {
+    const deferredOutcome = polishReadingLanguage({
+      ...baseResult,
+      verdict: {
+        kind: "outcome",
+        value: "조건을 더 확인",
+        statement: "강화 성공 여부는 조건을 더 확인해야 해요.",
+      },
+      summary: "강화 성공 여부는 조건을 더 확인해야 해요. 카드 근거를 살펴봐요.",
+    }, "강화에 성공할까?", "ko");
+
+    expect(() => enforceReadingQuality(deferredOutcome, {
+      question: "강화에 성공할까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract: {
+        kind: "outcome",
+        subject: "강화 성공 여부",
+        candidates: [],
+        decisive: true,
+      },
+    })).toThrow(/답을 미루지|해당 유형/);
+  });
+
+  it.each([
+    ["성공 여부 불확실", "이번 강화의 성공 여부는 불확실해요."],
+    ["반반", "이번 강화는 성공과 실패가 반반이에요."],
+    ["알 수 없음", "이번 강화의 결과는 아직 알 수 없어요."],
+  ])("rejects the ambiguous outcome %s", (value, statement) => {
+    const ambiguousOutcome = polishReadingLanguage({
+      ...baseResult,
+      verdict: { kind: "outcome", value, statement },
+      summary: `${statement} 카드 신호를 더 확인해요.`,
+    }, "강화에 성공할까?", "ko");
+
+    expect(() => enforceReadingQuality(ambiguousOutcome, {
+      question: "강화에 성공할까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract: {
+        kind: "outcome",
+        subject: "강화 성공 여부",
+        candidates: [],
+        decisive: true,
+      },
+    })).toThrow(/답을 미루지|긍정 또는 부정/);
+  });
+
+  it("rejects a direct outcome that immediately reopens the opposite side", () => {
+    const statement = "이번 강화는 성공할 가능성이 높지만 실패할 수도 있어요.";
+    const reopenedOutcome = polishReadingLanguage({
+      ...baseResult,
+      verdict: { kind: "outcome", value: "성공 가능성이 높음", statement },
+      summary: `${statement} 카드 신호가 두 방향을 보여줘요.`,
+    }, "강화에 성공할까?", "ko");
+
+    expect(() => enforceReadingQuality(reopenedOutcome, {
+      question: "강화에 성공할까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract: {
+        kind: "outcome",
+        subject: "강화 성공 여부",
+        candidates: [],
+        decisive: true,
+      },
+    })).toThrow(/반대 결과의 가능성/);
   });
 
   it("rejects answer-kind markers whose payload is only a generic need to check", () => {
@@ -993,44 +1098,44 @@ describe("enforceReadingQuality", () => {
       .toBe("회복과 목표 설정이라는 카드 원뜻을 이 자리에서 살필 오늘 할 일에 적용해요.");
   });
 
-  it("accepts a physical limitation regardless of Korean word order", () => {
-    const reorderedLimit: ReadingResult = {
+  it("accepts a direct tarot inference about fullness", () => {
+    const fullnessReading: ReadingResult = {
       ...cupsKnightResult,
       cardInterpretations: [{
         ...cupsKnightResult.cardInterpretations[0],
         reasoning: {
           ...cupsKnightResult.cardInterpretations[0].reasoning!,
-          questionConnection: "실제 포만감은 타로 카드만으로 알 수 없다. 포만감 자리에서는 순간적인 당김과 현재 배고픔을 구분하고, 사용자가 이미 아는 식사량을 따로 확인한다.",
-          decisionImpact: "현재 배고픔과 사용자가 이미 아는 식사량을 확인하는 판단을 지지한다.",
+          questionConnection: "포만감 자리에서는 컵 기사 역방향의 기분 변화가 식사 직후 만족감이 빨리 떨어지고 다시 허기가 올 가능성으로 이어져요.",
+          decisionImpact: "오래 든든한 메뉴보다 지금 당기는 맛을 고를 가능성이 높다는 결론에 무게를 더해요.",
         },
       }],
     };
-    expect(enforceReadingQuality(reorderedLimit, {
+    expect(enforceReadingQuality(fullnessReading, {
       question: "아침 뭐먹을까",
       language: "ko",
       sourceSentences: [cupsKnightExpected[0].sourceMeaning],
       expectedCards: cupsKnightExpected,
-    })).toBe(reorderedLimit);
+    })).toBe(fullnessReading);
   });
 
-  it("rejects a positive physical prediction followed by an unrelated negative word", () => {
-    const unsafeResult: ReadingResult = {
+  it("accepts a positive physical prediction from the card reading", () => {
+    const physicalPrediction: ReadingResult = {
       ...cupsKnightResult,
       cardInterpretations: [{
         ...cupsKnightResult.cardInterpretations[0],
         reasoning: {
           ...cupsKnightResult.cardInterpretations[0].reasoning!,
-          questionConnection: "포만감 자리에서 타로 카드는 실제 포만감을 알 수 있다. 현재 배고픔과 식사량을 확인한다.",
-          decisionImpact: "메뉴 선택을 판단하기 어렵다. 지금 먹고 싶은 마음을 우선해도 된다고 본다.",
+          questionConnection: "포만감 자리에서 컵 기사 역방향은 만족감이 짧게 끝나고 허기가 다시 올 가능성을 보여줘요.",
+          decisionImpact: "지금 먹고 싶은 맛은 충족하지만 오래 든든한 선택은 아니라는 쪽으로 판단해요.",
         },
       }],
     };
-    expect(() => enforceReadingQuality(unsafeResult, {
+    expect(enforceReadingQuality(physicalPrediction, {
       question: "아침 뭐먹을까",
       language: "ko",
       sourceSentences: ["가능성보다 반복된 행동을 기준으로 판단해야 한다."],
       expectedCards: cupsKnightExpected,
-    })).toThrow(/예측할 수 없다는 경계/);
+    })).toBe(physicalPrediction);
   });
 
   it("accepts concrete food axes written with menu, appetite, and hunger terms", () => {
@@ -1128,82 +1233,30 @@ describe("enforceReadingQuality", () => {
     })).toThrow(/내부 JSON 키/);
   });
 
-  it("rejects unsupported causal claims even when reasoning fields exist", () => {
-    const shallowResult: ReadingResult = {
+  it("accepts symbolic inferences about familiarity, satisfaction, and nutrition", () => {
+    const inferredResult: ReadingResult = {
       ...cupsKnightResult,
+      guidance: [
+        "새로운 재료보다 익숙한 맛이 오늘 입맛에 더 잘 맞아요.",
+        "단백질과 탄수화물이 함께 있는 든든한 메뉴를 골라요.",
+      ],
       cardInterpretations: [{
         ...cupsKnightResult.cardInterpretations[0],
-        text: "익숙한 식사로 만족감을 확보한다.",
+        text: "익숙한 맛이 만족감과 포만감을 더 오래 이어 줘요.",
         reasoning: {
           sourceMeaning: cupsKnightExpected[0].sourceMeaning,
-          questionConnection: "포만감 자리에서는 새로운 선택보다 익숙한 메뉴가 더 안정적이다. 다만 타로 카드는 실제 포만감을 알 수 없다.",
-          decisionImpact: "조리 부담이 적은 음식이 포만감을 높이므로 익숙한 메뉴를 고른다.",
+          questionConnection: "포만감 자리에서는 컵 기사 역방향의 기분 변화가 낯선 메뉴보다 익숙한 맛을 찾는 흐름으로 나타나요.",
+          decisionImpact: "익숙하고 영양 구성이 든든한 메뉴가 식사 만족감을 높인다는 쪽으로 결론내려요.",
         },
       }],
     };
 
-    expect(() => enforceReadingQuality(shallowResult, {
+    expect(enforceReadingQuality(inferredResult, {
       question: "아침 뭐먹을까",
       language: "ko",
       sourceSentences: [cupsKnightExpected[0].sourceMeaning],
       expectedCards: cupsKnightExpected,
-    })).toThrow(/근거 없는 식사 인과관계/);
-  });
-
-  it("rejects mood-based claims about post-meal satisfaction or fullness", () => {
-    const inventedResult: ReadingResult = {
-      ...cupsKnightResult,
-      cardInterpretations: [{
-        ...cupsKnightResult.cardInterpretations[0],
-        reasoning: {
-          ...cupsKnightResult.cardInterpretations[0].reasoning!,
-          questionConnection: "포만감 자리에서는 기분 변화가 식사 직후의 만족감이 지속되지 않을 수 있음을 나타낸다. 다만 타로 카드는 실제 포만감을 알 수 없다.",
-          decisionImpact: "메뉴를 고를 때 현재 배고픔과 사용자가 이미 아는 식사량을 확인한다.",
-        },
-      }],
-      axes: [
-        ...cupsKnightResult.axes.slice(0, 2),
-        { label: "식사 만족도 예측", score: 30, evidence: "심리적인 기분 변화로 인해 식사 후 만족감이 달라질 수 있다.", evidenceCardIds: ["cups-knight"] },
-      ],
-    };
-    expect(() => enforceReadingQuality(inventedResult, {
-      question: "아침 뭐먹을까",
-      language: "ko",
-      sourceSentences: ["가능성보다 반복된 행동을 기준으로 판단해야 한다."],
-      expectedCards: cupsKnightExpected,
-    })).toThrow(/근거 없는 식사 인과관계/);
-  });
-
-  it("rejects invented food outcomes outside the question and position", () => {
-    const inventedResult: ReadingResult = {
-      ...cupsKnightResult,
-      guidance: [
-        "기분 변화 때문에 과식하거나 불충분한 식사를 할 수 있다.",
-        "오전 활동량에 맞춰 식사량을 정한다.",
-      ],
-    };
-    expect(() => enforceReadingQuality(inventedResult, {
-      question: "아침 뭐먹을까",
-      language: "ko",
-      sourceSentences: [cupsKnightExpected[0].sourceMeaning],
-      expectedCards: cupsKnightExpected,
-    })).toThrow();
-  });
-
-  it("rejects invented claims that a menu uses familiar or new ingredients", () => {
-    const inventedResult: ReadingResult = {
-      ...cupsKnightResult,
-      guidance: [
-        "새로운 재료를 쓰는 메뉴를 골라요.",
-        "메뉴를 정한 뒤 준비를 시작해요.",
-      ],
-    };
-    expect(() => enforceReadingQuality(inventedResult, {
-      question: "김치찌개를 먹을지 애호박찌개를 먹을지 정확하게 알려줘",
-      language: "ko",
-      sourceSentences: [cupsKnightExpected[0].sourceMeaning],
-      expectedCards: cupsKnightExpected,
-    })).toThrow(/제공되지 않은 현실 특성/);
+    })).toBe(inferredResult);
   });
 
   it("polishes literal AI phrasing in every reasoning section", () => {

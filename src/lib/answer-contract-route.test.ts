@@ -7,6 +7,44 @@ import type { AnswerContract, ReadingResult } from "@/src/lib/tarot";
 import { ApiError } from "@/src/server/security";
 
 describe("candidate answer stabilization", () => {
+  it("does not repeat a direct outcome in the guidance list", () => {
+    const result: ReadingResult = {
+      verdict: {
+        kind: "outcome",
+        value: "실패",
+        statement: "이번 강화는 실패할 거예요.",
+      },
+      summary: "이번 강화는 실패할 거예요. 역방향 카드의 방해 신호가 더 강해요.",
+      cardInterpretations: [{
+        cardId: "major-07",
+        positionTitle: "강화 결과",
+        orientation: "reversed",
+        text: "강화 결과가 실패 쪽으로 기울어요.",
+        reasoning: {
+          sourceMeaning: "전차 역방향은 통제 상실과 방향 이탈을 뜻해요.",
+          questionConnection: "강화 결과 자리에서 통제 상실은 성공 흐름이 꺾이는 모습으로 이어져요.",
+          decisionImpact: "실패 쪽 결론에 강한 무게를 더해요.",
+        },
+        evidence: ["역방향 · 통제 상실", "자리 · 강화 결과"],
+      }],
+      synthesis: "전차 카드는 강화 과정의 통제가 무너지며 실패 쪽으로 기우는 근거가 돼요.",
+      guidance: ["강화 재료를 다시 모아요.", "다음 시도까지 기다려요."],
+      axes: [
+        { label: "성공 신호", score: 25, evidence: "성공을 지지하는 힘이 약해요.", evidenceCardIds: ["major-07"] },
+        { label: "실패 신호", score: 70, evidence: "통제 상실이 실패 쪽을 강화해요.", evidenceCardIds: ["major-07"] },
+        { label: "결론 선명도", score: 78, evidence: "부정 신호가 뚜렷해요.", evidenceCardIds: ["major-07"] },
+      ],
+      signals: { support: 25, caution: 55, uncertainty: 20 },
+    };
+
+    expect(stabilizeAnswerContractReading(result, {
+      kind: "outcome",
+      subject: "강화 성공 여부",
+      candidates: [],
+      decisive: true,
+    }).guidance).toEqual(result.guidance);
+  });
+
   it("does not lead an open recommendation into card selection when AI is unavailable", () => {
     const openRecommendation: AnswerContract = {
       kind: "recommend_one",
@@ -69,7 +107,7 @@ describe("candidate answer stabilization", () => {
         evidence: ["정방향 · 제안 · 이상", "자리 · 과일 요거트 선택"],
       },
     ];
-    const unsafeAiResult: ReadingResult = {
+    const ungroundedAiResult: ReadingResult = {
       verdict: {
         kind: "choose_one",
         value: "과일 요거트",
@@ -96,15 +134,14 @@ describe("candidate answer stabilization", () => {
         { label: "만족감", score: 50, evidence: "만족을 예측해요.", evidenceCardIds: ["cups-knight"] },
       ],
       signals: { support: 50, caution: 30, uncertainty: 20 },
-      limitation: "확정 예측은 아니에요.",
     };
 
-    const stabilized = stabilizeAnswerContractReading(unsafeAiResult, answerContract, "ko");
+    const stabilized = stabilizeAnswerContractReading(ungroundedAiResult, answerContract);
 
     expect(readingResultSchema.parse(stabilized)).toEqual(stabilized);
-    expect(stabilized.summary.startsWith(unsafeAiResult.verdict!.statement)).toBe(true);
-    expect(stabilized.cardInterpretations).toEqual(unsafeAiResult.cardInterpretations);
-    expect(stabilized.axes).toEqual(unsafeAiResult.axes);
+    expect(stabilized.summary.startsWith(ungroundedAiResult.verdict!.statement)).toBe(true);
+    expect(stabilized.cardInterpretations).toEqual(ungroundedAiResult.cardInterpretations);
+    expect(stabilized.axes).toEqual(ungroundedAiResult.axes);
     expect(JSON.stringify(stabilized)).toMatch(/더 편안한 식사|실제 준비 상태|더 만족스러운 결과|토스트는 복잡/);
     expect(stabilized.signals.support + stabilized.signals.caution + stabilized.signals.uncertainty).toBe(100);
     expect(() => enforceReadingQuality(stabilized, {

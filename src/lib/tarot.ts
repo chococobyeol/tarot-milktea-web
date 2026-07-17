@@ -92,7 +92,6 @@ export interface ReadingResult {
   guidance: string[];
   axes: ReadingAxis[];
   signals: ReadingSignals;
-  limitation: string;
 }
 
 export interface FollowupRecord {
@@ -108,7 +107,7 @@ export interface FollowupRecord {
 export type QuestionCategory = "relationship" | "work" | "decision" | "self";
 export type ReadingLanguage = "ko" | "en";
 export type BinaryChoices = [string, string];
-export type AnswerKind = "choose_one" | "recommend_one" | "yes_no" | "compare" | "forecast" | "advice" | "explain" | "analysis";
+export type AnswerKind = "choose_one" | "recommend_one" | "yes_no" | "outcome" | "compare" | "forecast" | "advice" | "explain" | "analysis";
 
 export interface AnswerContract {
   kind: AnswerKind;
@@ -356,6 +355,7 @@ export function createAnswerContract(
   const asksForExplanation = /왜|이유|원인|어째서|why|reason|cause/iu.test(normalized);
   const asksForChoice = /골라|선택|정해|어느\s*쪽|뭘로|무엇으로|하나만|pick|choose|which\s+(?:one|option)|decide/iu.test(normalized);
   const asksToCompare = /비교|차이|장단점|compare|difference|pros?\s*(?:and|&)\s*cons?/iu.test(normalized);
+  const asksForTiming = /언제|시기|몇\s*(?:일|주|달|개월|년)|when|what\s+time|how\s+soon/iu.test(normalized);
 
   // A sentence-level request such as "why do I keep wondering what to eat?"
   // is asking for a cause, not for the embedded food choice to be made.
@@ -388,6 +388,9 @@ export function createAnswerContract(
       candidates: [],
       decisive: true,
     };
+  }
+  if (!asksForTiming && /(?:성공|실패|합격|불합격|붙(?:을|게|겠|나|었)|통과|탈락|당첨|성사|달성|회복|완료|해낼|잘\s*될|이루어질|이뤄질).{0,20}(?:까|까요|가능성|전망|것\s*같|수\s*있)|(?:연락|답장|기회|결과).{0,12}(?:올까|나올까|생길까)|(?:succeed|fail|pass|accepted|rejected|win|recover|work\s+out|happen).{0,24}(?:\?|likely|chance|will|would|could)/iu.test(normalized)) {
+    return { kind: "outcome", subject: current.slice(0, 100), candidates: [], decisive: true };
   }
   if (/할까\s*말까|해도\s*될까|맞을까|아닐까|가능할까|될까요|(?:하는|가는|사는)\s*(?:게|것이)\s*(?:좋을|나을)까|(?:연락|이직|지원|신청|구매|시작|중단|계속)(?:을|를)?\s*할까|(?:만날|보낼|갈|먹을|입을|살)까|will\s+it|is\s+it\s+(?:right|okay)|yes\s+or\s+no/iu.test(normalized)
     || (!englishOpenQuestion && /\bshould\s+i\b/iu.test(normalized))) {
@@ -786,7 +789,6 @@ function readingResultToHaeyo(result: ReadingResult): ReadingResult {
       ...axis,
       evidence: toKoreanHaeyo(axis.evidence),
     })),
-    limitation: toKoreanHaeyo(result.limitation),
   };
 }
 
@@ -860,7 +862,7 @@ function generateCandidateResult(
           sourceMeaning: `${card.nameEn} ${orientation}: ${meaning.summary}`,
           questionConnection: `In the ${selected.positionTitle} position, the card's ${meaning.keywords.slice(0, 2).join(" and ")} themes are used as a comparative tarot signal for ${candidate}.`,
           decisionImpact: comparisonMode
-            ? `This signal distinguishes ${candidate} from the other candidates without declaring it objectively better.`
+            ? `This card signal describes how ${candidate} is likely to feel or work out compared with the other candidates.`
             : isWinner ? `This signal makes ${candidate} the direct answer to the user's request.` : `This signal does not outweigh the stronger support for ${winner}.`,
         },
         evidence: [`${orientation} · ${meaning.keywords.slice(0, 2).join(" · ")}`, `Position · ${selected.positionTitle}`],
@@ -875,9 +877,9 @@ function generateCandidateResult(
         : isWinner ? `${candidate} 쪽 카드 신호가 후보 중 가장 강해요.` : `${candidate} 쪽에는 상대적으로 약하거나 주의가 필요한 신호가 나와요.`,
       reasoning: {
         sourceMeaning: toKoreanHaeyo(`${card.nameKo} ${orientation === "upright" ? "정방향" : "역방향"}은 ${meaning.summary}`),
-        questionConnection: `${selected.positionTitle} 자리에서는 ${card.nameKo}의 ${meaning.keywords.slice(0, 2).join("·")} 의미를 ${candidate} 선택의 비교 신호로 적용해요. 실제 대상의 객관적 속성을 카드가 증명한다고 보지는 않아요.`,
+        questionConnection: `${selected.positionTitle} 자리에서는 ${card.nameKo}의 ${meaning.keywords.slice(0, 2).join("·")} 의미를 ${candidate}의 분위기와 예상 결과에 연결해요.`,
         decisionImpact: comparisonMode
-          ? `이 신호는 ${candidate} 쪽의 차이를 설명하지만, 이 후보가 객관적으로 더 낫다는 뜻은 아니에요.`
+          ? `이 신호는 ${candidate}가 다른 후보보다 어떻게 느껴지고 흘러갈지를 구체적으로 보여줘요.`
           : isWinner
           ? `이 카드 신호가 다른 후보보다 강해서 ${withParticle(winner, "을", "를")} 이번 질문의 직접 답으로 정해요.`
           : `이 카드의 주의점은 반영하지만, 더 강한 신호를 받은 ${winner} 쪽이라는 결론을 다시 열지는 않아요.`,
@@ -933,25 +935,22 @@ function generateCandidateResult(
     verdict: { kind: contract.kind, value: comparisonMode ? verdictValue : winner, statement },
     summary: language === "ko"
       ? comparisonMode
-        ? `${statement} 각 차이는 후보의 실제 속성이 아니라 카드 원뜻을 후보별 자리에 적용한 결과예요.`
+        ? `${statement} 카드 원뜻을 후보별 자리에 적용하면 이 차이가 가장 뚜렷하게 보여요.`
         : `${statement} 후보별 카드의 방향과 의미를 비교하면 ${winner} 쪽 신호가 가장 강해요.`
       : comparisonMode
-        ? `${statement} These are tarot signals assigned to each candidate, not objective properties.`
+        ? `${statement} Applying each card meaning to its candidate makes this contrast the clearest.`
         : `${statement} Comparing the orientation and meaning of each candidate card gives ${winner} the strongest signal.`,
     cardInterpretations,
     synthesis,
     guidance: language === "ko"
       ? comparisonMode
-        ? [`${candidates[0]} 쪽의 카드 신호와 ${candidates[1]} 쪽의 카드 신호를 질문의 실제 조건과 따로 구분해 봐요.`, "선택까지 원하면 어떤 후보를 고를지 추가 질문으로 물어볼 수 있어요."]
-        : [`이번에는 ${withParticle(`“${winner}”`, "으로", "로")} 결정해요.`, "실행할 수 없는 현실적인 사정이 있을 때만 결론을 바꿔요."]
+        ? [`${candidates[0]} 쪽과 ${candidates[1]} 쪽에서 나온 차이를 비교해요.`, "선택까지 원하면 어떤 후보를 고를지 추가 질문으로 물어볼 수 있어요."]
+        : [`이번에는 ${withParticle(`“${winner}”`, "으로", "로")} 결정해요.`, `${winner} 쪽 카드에서 강하게 나온 특징을 선택 기준으로 삼아요.`]
       : comparisonMode
-        ? ["Keep each card signal separate from verifiable real-world facts.", "Ask a follow-up if you want the reading to choose one candidate."]
-        : [`Act on “${winner}.”`, "Override it only if a real-world constraint makes it unavailable."],
+        ? ["Compare the differences shown for the first and second candidates.", "Ask a follow-up if you want the reading to choose one candidate."]
+        : [`Act on “${winner}.”`, `Use the strongest traits shown for ${winner} as the reason for the choice.`],
     axes,
     signals: { support, caution, uncertainty },
-    limitation: language === "ko"
-      ? "이 결론은 후보별 카드 신호를 비교한 타로 해석이며, 대상의 객관적 속성이나 실제 결과를 증명하지 않아요."
-      : "These scores are not real-world probabilities. The conclusion compares tarot signals and does not prove objective properties or outcomes.",
   };
 }
 
@@ -1021,22 +1020,22 @@ export function generateReadingResult(
       cardId: card.id,
       positionTitle: selected.positionTitle,
       orientation,
-      text: `${selected.positionTitle}에서는 ${meaning.keywords[0]} 신호를 기준으로 ${selected.positionFocus}을 확인한다.`,
+      text: `${selected.positionTitle}에서는 ${meaning.keywords[0]} 신호가 ${selected.positionFocus}의 결과를 직접 기울인다.`,
       reasoning: {
         sourceMeaning: `${card.nameKo} ${orientation === "upright" ? "정방향" : "역방향"}은 ${meaning.summary}`,
-        questionConnection: `${selected.positionTitle} 자리는 ${selected.positionFocus}을 살핀다. 이 카드의 ${meaning.keywords.slice(0, 2).join("·")} 신호를 질문과 연결하면 ${withParticle(contextFor(card, category), "을", "를")} 사실과 구분해 확인해야 한다.`,
-        decisionImpact: `${meaning.caution} 이 주의점을 확인하기 전에는 카드 한 장만으로 질문의 결과를 확정하지 않는다.`,
+        questionConnection: `${selected.positionTitle} 자리에서는 ${meaning.keywords.slice(0, 2).join("·")} 신호가 ${withParticle(contextFor(card, category), "을", "를")} 어떤 방향으로 이끄는지 보여 준다.`,
+        decisionImpact: `${meaning.caution} 이 주의 신호는 질문의 결과를 부정적으로 기울이는 근거로 반영한다.`,
       },
       evidence: [`${orientation === "upright" ? "정방향" : "역방향"} · ${meaning.keywords.slice(0, 2).join(" · ")}`, `자리 · ${selected.positionTitle}`],
     } : {
       cardId: card.id,
       positionTitle: selected.positionTitle,
       orientation,
-      text: `${card.nameEn} in the ${selected.positionTitle} position indicates that ${selected.positionFocus.toLowerCase()} should be checked against concrete conditions rather than treated as a fixed prediction.`,
+      text: `${card.nameEn} in the ${selected.positionTitle} position gives a direct prediction about ${selected.positionFocus.toLowerCase()}.`,
       reasoning: {
         sourceMeaning: `${card.nameEn} ${orientation === "upright" ? "upright" : "reversed"}: ${meaning.summary}`,
         questionConnection: `The ${selected.positionTitle} position examines ${selected.positionFocus.toLowerCase()}. The card's ${meaning.keywords.slice(0, 2).join(" and ")} themes identify what must be checked in the question.`,
-        decisionImpact: `${meaning.caution} Treat this as a condition on the decision, not a fixed prediction.`,
+        decisionImpact: `${meaning.caution} This caution weighs directly against a positive outcome.`,
       },
       evidence: [`${orientation === "upright" ? "Upright" : "Reversed"} · ${meaning.keywords.slice(0, 2).join(" · ")}`, `Position · ${selected.positionTitle}`],
     };
@@ -1057,22 +1056,34 @@ export function generateReadingResult(
   const firstMeaning = first[firstSelected.reversed ? "reversed" : "upright"];
   const lastMeaning = last[lastSelected.reversed ? "reversed" : "upright"];
   const leaning = language === "ko"
-    ? (support >= caution + 12 ? "진행을 지지하는 신호가 상대적으로 크다" : caution > support ? "주의 신호를 먼저 다뤄야 한다" : "진행과 주의 신호가 비슷해 조건 확인이 우선이다")
-    : (support >= caution + 12 ? "Signals supporting progress are relatively stronger" : caution > support ? "Caution signals should be handled first" : "Support and caution are close, so conditions should be verified first");
+    ? (support >= caution ? "진행을 지지하는 신호가 더 강하다" : "실패나 지연을 가리키는 신호가 더 강하다")
+    : (support >= caution ? "The cards lean toward progress" : "The cards lean toward failure or delay");
 
-  const summary = language === "ko" ? (latestCards.length === 1
-    ? `${leaning}. ${first.nameKo}의 ${firstMeaning.keywords[0]} 신호를 중심으로, 결과 예측보다 현재 확인할 기준과 실행 조건을 분리하는 해석이 적절하다.`
-    : `${leaning}. ${first.nameKo}의 ${firstMeaning.keywords[0]}과 ${last.nameKo}의 ${lastMeaning.keywords[0]}이 함께 나타나므로, 단순한 결과 예측보다 질문에서 확인해야 할 기준과 실행 조건을 분리하는 해석이 적절하다.`)
-    : (latestCards.length === 1
-      ? `${leaning}. ${first.nameEn} suggests separating the criteria to verify from the conditions required for action instead of treating the card as an outcome prediction.`
-      : `${leaning}. ${first.nameEn} and ${last.nameEn} appear together, so the reading should separate the criteria to verify from the conditions required for action instead of predicting a simple result.`);
+  const positiveOutcome = support >= caution;
+  const outcomeValue = language === "ko"
+    ? positiveOutcome ? "성공" : "실패"
+    : positiveOutcome ? "Success" : "Failure";
+  const outcomeStatement = language === "ko"
+    ? `이번 카드 배열에서 “${question.replace(/[?？.!]+$/u, "")}”의 결과는 ${positiveOutcome ? "성공할 가능성이 높아요" : "실패할 가능성이 높아요"}.`
+    : `For “${question.replace(/[?!.]+$/u, "")},” this spread points to ${positiveOutcome ? "success" : "failure"}.`;
+
+  const summary = contract.kind === "outcome"
+    ? (language === "ko"
+      ? `${outcomeStatement} ${first.nameKo}의 ${firstMeaning.keywords[0]} 신호가 이 결론에 가장 크게 작용해요.`
+      : `${outcomeStatement} ${first.nameEn}'s ${firstMeaning.keywords[0]} signal weighs most heavily in this conclusion.`)
+    : language === "ko" ? (latestCards.length === 1
+      ? `${leaning}. ${first.nameKo}의 ${firstMeaning.keywords[0]} 신호가 질문의 결과를 이 방향으로 이끈다.`
+      : `${leaning}. ${first.nameKo}의 ${firstMeaning.keywords[0]}과 ${last.nameKo}의 ${lastMeaning.keywords[0]}이 함께 이 결론을 만든다.`)
+      : (latestCards.length === 1
+        ? `${leaning}. ${first.nameEn}'s ${firstMeaning.keywords[0]} signal drives this result.`
+        : `${leaning}. ${first.nameEn} and ${last.nameEn} combine to produce this result.`);
 
   const synthesis = language === "ko" ? (latestCards.length === 1
-    ? `${firstMeaning.summary} 이 카드가 맡은 ${firstSelected.positionTitle}의 관점에서, 현재 상황을 유지할지 바꿀지보다 어떤 조건이 충족될 때 움직일지를 먼저 정하는 편이 일관된다.`
-    : `카드 흐름은 ${first.nameKo}에서 시작해 ${last.nameKo}로 이어진다. 초반에는 ${firstMeaning.summary} 이후에는 ${lastMeaning.summary} 따라서 현재 상황을 유지할지 바꿀지보다, 어떤 조건이 충족될 때 움직일지를 먼저 정하는 편이 일관된다.`)
+    ? `${firstMeaning.summary} ${firstSelected.positionTitle} 자리의 이 의미가 질문의 결과를 ${positiveOutcome ? "긍정" : "부정"} 쪽으로 기울인다.`
+    : `카드 흐름은 ${first.nameKo}에서 시작해 ${last.nameKo}로 이어진다. ${firstMeaning.summary} 이어서 ${lastMeaning.summary} 이 조합은 질문의 결과를 ${positiveOutcome ? "긍정" : "부정"} 쪽으로 기울인다.`)
     : (latestCards.length === 1
-      ? `${first.nameEn} occupies the ${firstSelected.positionTitle} position. Define the conditions that would justify action before deciding whether to maintain or change the current situation.`
-      : `The sequence moves from ${first.nameEn} to ${last.nameEn}. Define the conditions that would justify action before deciding whether to maintain or change the current situation.`);
+      ? `${first.nameEn} occupies the ${firstSelected.positionTitle} position and pushes the result in a ${positiveOutcome ? "positive" : "negative"} direction.`
+      : `The sequence moves from ${first.nameEn} to ${last.nameEn}, pushing the result in a ${positiveOutcome ? "positive" : "negative"} direction.`);
 
   const labels = previous?.axes.map((axis) => axis.label) ?? axisLabels(category, language);
   const axes = labels.slice(0, 5).map((label, index) => {
@@ -1106,8 +1117,8 @@ export function generateReadingResult(
   const result: ReadingResult = {
     verdict: {
       kind: contract.kind,
-      value: summary.split(/[.!?\n]/u)[0] ?? summary,
-      statement: summary.split(/[.!?\n]/u)[0] ?? summary,
+      value: contract.kind === "outcome" ? outcomeValue : summary.split(/[.!?\n]/u)[0] ?? summary,
+      statement: contract.kind === "outcome" ? outcomeStatement : summary.split(/[.!?\n]/u)[0] ?? summary,
     },
     summary,
     cardInterpretations,
@@ -1115,7 +1126,6 @@ export function generateReadingResult(
     guidance,
     axes,
     signals: { support, caution, uncertainty },
-    limitation: language === "ko" ? "이 수치는 실제 사건의 확률이 아니라 질문과 카드 관계를 정규화한 AI 해석 지표다. 확인되지 않은 타인의 감정이나 미래 결과를 사실로 확정하지 않는다." : "These values are normalized AI interpretation indicators, not probabilities of real events. They do not establish another person's unverified feelings or a future outcome as fact.",
   };
   return language === "ko" ? readingResultToHaeyo(result) : result;
 }

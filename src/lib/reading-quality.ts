@@ -122,6 +122,7 @@ const CONTRACT_DECISIVENESS: Record<AnswerContract["kind"], boolean> = {
   choose_one: true,
   recommend_one: true,
   yes_no: true,
+  outcome: true,
   compare: false,
   forecast: false,
   advice: true,
@@ -131,19 +132,26 @@ const CONTRACT_DECISIVENESS: Record<AnswerContract["kind"], boolean> = {
 const EXPLICIT_ANSWER_SHAPE: Partial<Record<AnswerContract["kind"], RegExp>> = {
   choose_one: /골라|선택|하나만|pick|choose|which\s+(?:one|option)/iu,
   yes_no: /할까\s*말까|예(?:\s*\/\s*|\s*아니면\s*)아니요|yes\s+or\s+no/iu,
+  outcome: /성공|실패|합격|불합격|붙을까|통과|탈락|당첨|성사|달성|회복|완료|해낼|잘\s*될|이루어질|succeed|fail|pass|accepted|rejected|win|recover|work\s+out|happen/iu,
   compare: /비교|차이|장단점|compare|difference|pros?\s*(?:and|&)\s*cons?/iu,
   forecast: /언제|시기|전망|향후|when|forecast|outlook/iu,
   advice: /조언|방법|어떻게\s+(?:해야|하면)|what\s+should\s+i\s+do|advice|next\s+step/iu,
   explain: /왜|이유|원인|어째서|why|reason|cause/iu,
 };
-const DEFERRED_ANSWER = /상황에 따라|조건(?:을|부터)? (?:더 )?확인|판단하기 어렵|결정하기 어렵|둘 다|경우에 따라|it depends|need more (?:context|information)|cannot decide|both options/i;
+const DEFERRED_ANSWER = /상황에 따라|조건(?:을|부터)? (?:더 )?확인|판단하기 어렵|결정하기 어렵|둘 다|경우에 따라|불확실|반반|알 수 없|모르겠|아직 정해지지|it depends|need more (?:context|information)|cannot (?:decide|tell|know)|both options|uncertain|fifty[- ]?fifty|50\s*[/:-]\s*50/i;
+const DIRECT_OUTCOME_ASSERTION = /(?:성공|실패|합격|불합격|통과|탈락|당첨|낙첨|성사|무산|달성|미달|회복|악화|완료|미완료|이루어짐|불발)(?:할|될)?\s*(?:가능성(?:이|은)?\s*(?:높|낮|크|작)|쪽|할\s*거|될\s*거|것으로\s*(?:보|예상)|로\s*(?:보|예상))|(?:성공|합격|통과|당첨|성사|달성|회복|완료)(?:하|되|할|될|할\s*수\s*있|될\s*수\s*있)|(?:실패|불합격|탈락|낙첨|무산|악화|미완료)(?:하|되|할|될)|(?:성공|합격|통과|성사|달성|회복|완료)(?:하지|되지|하지\s*못|되지\s*못)\s*않|(?:연락|답장|기회|결과).{0,18}(?:올|오지\s*않|나올|나오지\s*않|생길|생기지\s*않)\s*(?:가능성|거|것)|(?:will|likely|unlikely|expected\s+to|points?\s+to).{0,32}(?:succeed|fail|pass|reject|win|lose|recover|complete|happen|arrive)|(?:success|failure|acceptance|rejection|passing|failing)\s+(?:is|looks|seems|appears)/iu;
+const POSITIVE_OUTCOME_TOKEN = /성공|합격|통과|당첨|성사|달성|회복|완료|이루어|해낼|succeed|success|pass|accept|win|recover|complete/iu;
+const NEGATIVE_OUTCOME_TOKEN = /실패|불합격|탈락|낙첨|무산|악화|미완료|불발|fail|failure|reject|lose|decline|worsen|incomplete/iu;
+const OUTCOME_REOPENING_CONNECTOR = /하지만|그렇지만|다만|반면|한편|더라도|수도\s*있|가능성도|\bbut\b|\bhowever\b|\bon the other hand\b|\bcould also\b|\bmight still\b/iu;
 const GENERIC_RECOMMENDATION = /^(?:(?:적당한|알맞은|괜찮은|좋은|무난한|상황에 맞는|조건에 맞는|추천할 만한|따뜻한|차가운|매운|가벼운|든든한|간단한|부드러운|자극적(?:인)?|편한|재미있는|조용한)\s*)*(?:것|선택|선택지|방법|메뉴|음식|요리|식사|아침|한식|중식|일식|양식|국물(?:\s*요리)?|면(?:\s*요리)?|밥(?:\s*요리)?|옷|옷차림|작품|영화|책|장소|곳|행동|활동|제품|물건|대안|옵션|option|choice|something|whatever fits)$/i;
+const GENERIC_NAMED_CATEGORY = /^(?:[가-힣a-z0-9]+\s+){1,4}(?:요리|음식|메뉴|식사|옷|옷차림|작품|장소|활동|제품|물건|dish|food|meal|outfit|work|place|activity|product|item)$/iu;
 const GENERIC_ANSWER_TOKEN = /^(?:먼저|우선|현재|지금|이번|조금|좀|더|다음|천천히|신중한|신중하게|차분한|차분하게|그냥|일단|상황|흐름|조건|문제|부분|요소|방향|방향성|접근|상태|가능성|전체|전반|필요|중요|적절|다시|이후|그다음|게|것|수|current|situation|flow|condition|issue|factor|direction|approach|carefully|slowly|review|check|consider|decide|decision)$/i;
 const GENERIC_ANSWER_VERB = /^(?:살펴|확인|점검|고려|검토|파악|접근|결정|판단|생각|보여|좋|나)(?:[가-힣]*)$/u;
 const NOVELTY_GENERIC_TOKEN = /^(?:살펴|확인|점검|고려|검토|파악|접근|판단|생각|질문|답변|답|결론|가능|가능성|전망|시기|흐름|방향|변화|결과|상태|상황|조건|문제|원인|이유|핵심|중심|발견|행동|패턴|필요|중요|적절|신중|차분|확실|불확실|있|없|보이|나타나|무언가|뭔가)(?:[가-힣]*)$/u;
 const KIND_SEMANTIC_PATTERN: Partial<Record<AnswerContract["kind"], RegExp>> = {
   explain: /원인|이유|때문|비롯|영향으로|because|reason|cause|stems?\s+from|driven\s+by|due\s+to/i,
   forecast: /(?:\d+\s*(?:일|주|개월|달|년)|(?:이번|다음)\s*(?:주|달|주말)|봄|여름|가을|겨울|상반기|하반기|예상\s*시기|전망(?:은|이)|가장\s*가능성(?:이|은)\s*(?:큰|높은)|흐름(?:은|이).{0,40}(?:쪽|방향|증가|감소|이어|바뀌)|\blikely\b|\bexpected\b|\bwithin\b|\bnext\s+(?:week|month|year)\b|\btoward\b|\bincreas|\bdecreas)/iu,
+  outcome: /성공|실패|합격|불합격|통과|탈락|당첨|성사|달성|회복|완료|이루어|해낼|될\s*가능성|가능성(?:이|은)?\s*(?:높|낮)|일어날|오지\s*않|올\s*가능성|succeed|fail|pass|reject|win|recover|complete|likely|unlikely|will|won't|will\s+not/iu,
   advice: /(?:먼저|우선)\s*(?:할|해야|해볼)\s*(?:일|행동)(?:은|이)|\bfirst(?:\s+(?:action|step))?\b|start\s+by|you\s+should/i,
   analysis: /핵심|중심|가장\s*중요|두드러진|main\s+(?:finding|pattern|issue)|key\s+(?:finding|pattern|issue)|central\s+(?:finding|pattern|issue)|most\s+important/i,
 };
@@ -197,8 +205,24 @@ function answerContractIssues(
   if (contract.decisive && DEFERRED_ANSWER.test(`${verdict.statement} ${firstSentence}`)) {
     issues.push("직접 결론을 요구한 질문에서 조건부 표현으로 답을 미루지 말아야 한다.");
   }
-  if (!CONTRACT_CANDIDATE_KINDS.has(contract.kind) && !hasSpecificAnswerContent(verdict.value)) {
-    issues.push("verdict.value에는 어느 질문에나 붙일 수 있는 태도나 절차가 아니라 구체적인 원인·흐름·행동·발견을 써야 한다.");
+  if (contract.kind === "outcome" && !DIRECT_OUTCOME_ASSERTION.test(verdict.statement)) {
+    issues.push("결과 질문은 불확실하다고 미루지 말고 성공·실패처럼 긍정 또는 부정 한쪽을 직접 말해야 한다.");
+  }
+  if (
+    contract.kind === "outcome"
+    && POSITIVE_OUTCOME_TOKEN.test(verdict.statement)
+    && NEGATIVE_OUTCOME_TOKEN.test(verdict.statement)
+    && OUTCOME_REOPENING_CONNECTOR.test(verdict.statement)
+  ) {
+    issues.push("결과 첫 문장에서 한쪽을 고른 뒤 반대 결과의 가능성을 다시 열지 말아야 한다.");
+  }
+  if (
+    !CONTRACT_CANDIDATE_KINDS.has(contract.kind)
+    && (!hasSpecificAnswerContent(verdict.value) || (contract.kind === "recommend_one" && GENERIC_NAMED_CATEGORY.test(verdict.value.trim())))
+  ) {
+    issues.push(contract.kind === "recommend_one"
+      ? "verdict.value에는 범주가 아니라 바로 선택할 수 있는 구체적인 답 하나를 써야 한다."
+      : "verdict.value에는 어느 질문에나 붙일 수 있는 태도나 절차가 아니라 구체적인 원인·흐름·행동·발견을 써야 한다.");
   }
   if (
     !CONTRACT_CANDIDATE_KINDS.has(contract.kind)
@@ -208,6 +232,7 @@ function answerContractIssues(
   }
   if (
     !CONTRACT_CANDIDATE_KINDS.has(contract.kind)
+    && contract.kind !== "outcome"
     && !hasNovelAnswerContent(verdict.value, `${contract.subject} ${question}`)
   ) {
     issues.push("verdict.value는 질문을 다시 말하거나 확인하겠다고만 하지 말고, 질문에 없던 실제 원인·방향·행동·발견을 답으로 제시해야 한다.");
@@ -256,6 +281,13 @@ function answerContractIssues(
     if (/(?:아니면|또는|혹은|대신).{0,36}(?:괜찮|추천|먹|입|고르|선택|해도|할 수)|(?:another|alternatively|or instead).{0,36}(?:recommend|choose|pick|eat|wear|also)/iu.test(supplementalText)) {
       issues.push("열린 추천은 결론 뒤에 다른 대안을 다시 제시하지 말고 정한 답 하나만 유지해야 한다.");
     }
+    const unlinkedAlternative = supplementalText
+      .split(/[.!?\n]/u)
+      .find((sentence) => /(?:도\s*(?:괜찮|좋|추천)|역시\s*(?:괜찮|좋|추천))/u.test(sentence)
+        && !normalize(sentence).includes(normalizedValue));
+    if (unlinkedAlternative) {
+      issues.push("열린 추천의 종합과 확인 항목에서 정한 답이 아닌 다른 대안을 덧붙이지 말아야 한다.");
+    }
   } else if (contract.kind === "compare") {
     const representedCandidates = contract.candidates.filter((candidate) => (
       normalize(result.verdict?.statement ?? "").includes(normalize(candidate))
@@ -300,64 +332,11 @@ function appliedProseSections(result: ReadingResult): string[] {
       item.reasoning?.decisionImpact ?? "",
     ]),
     ...result.axes.flatMap((axis) => [axis.label, axis.evidence]),
-    result.limitation,
   ].filter(Boolean);
 }
 
 const KOREAN_FORMAL_ENDING = /합니다|하십시오|됩니다|있습니다|없습니다|않습니다|못합니다|입니다/;
 const INTERNAL_SCHEMA_TERM = /position[_ ]?focus|position[_ ]?title|source[_ ]?meaning|question[_ ]?connection|decision[_ ]?impact|card[_ ]?interpretations|evidence[_ ]?card[_ ]?ids/i;
-
-const UNSUPPORTED_FOOD_CAUSALITY: RegExp[] = [
-  /조리(?:가| 과정| 시간| 부담).{0,35}(?:포만감|든든함).{0,25}(?:높|늘|증가|보장|확보)/,
-  /(?:조리|준비) 부담이 (?:적|낮|작).{0,30}(?:포만감|든든함)/,
-  /(?:간단|익숙)한 (?:음식|메뉴|식사).{0,30}(?:포만감|든든함).{0,20}(?:높|늘|보장|확보)/,
-  /(?:금방|곧) (?:허기|배가 고)/,
-  /실제 배를 채워.{0,25}(?:못|않|어렵)/,
-  /포만감(?:은|이|을)?.{0,25}(?:낮|높|부족|지속되지|이어지기 어렵)/,
-  /식사\s*(?:직후|후)(?:의|에는?|에서)?\s*.{0,20}(?:만족감|포만감).{0,35}(?:(?:유지|지속).{0,8}(?:않|못|어렵)|달라|변하|떨어|낮|사라|이어지|예상과 다|다를 수)/,
-  /(?:기분|감정|심리).{0,45}(?:때문|영향|변화|따라|인해).{0,60}식사\s*(?:직후|후)(?:의|에는?|에서)?\s*.{0,20}(?:만족감|포만감).{0,25}(?:달라|변하|떨어|낮|지속|유지|이어지)/,
-  /기분.{0,25}(?:과식|불충분한 식사)/,
-];
-
-const FOOD_SPECIFIC_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegExp; symbolicRecommendation?: boolean }> = [
-  { output: /자극적(?:인|이다|으로)?/, allowedByQuestion: /자극/, symbolicRecommendation: true },
-  { output: /화려한|화려하다/, allowedByQuestion: /화려/, symbolicRecommendation: true },
-  { output: /든든한 재료/, allowedByQuestion: /든든|재료/ },
-  { output: /단백질|탄수화물|지방|식이섬유|칼로리/, allowedByQuestion: /단백질|탄수화물|지방|식이섬유|칼로리/ },
-  { output: /미리 정한 식단|평소 식단|식단을 따른다/, allowedByQuestion: /식단/ },
-  { output: /활동량/, allowedByQuestion: /활동|운동/ },
-  { output: /과식|불충분한 식사/, allowedByQuestion: /과식|폭식|소식|식사량|양이 (?:적|많)/ },
-  { output: /강하게 당기는/, allowedByQuestion: /강하게|너무 먹고 싶|당기/ },
-];
-
-const CANDIDATE_OPTION_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegExp }> = [
-  {
-    output: /(?:익숙한|익숙해서|익숙하므로|익숙하니|낯익은)(?:\s+(?:메뉴|식사|음식|재료|후보|선택지|방법|장소|사람))?/,
-    allowedByQuestion: /익숙|낯익|평소|자주/,
-  },
-  {
-    output: /(?:(?:새로운|낯선)(?:\s+(?:메뉴|식사|음식|재료|조리 방식|후보|선택지|방법|장소|사람))?|새\s+(?:메뉴|식사|음식|재료|조리 방식|후보|선택지|방법|장소|사람))/,
-    allowedByQuestion: /새|새롭|처음|낯설|재료|조리/,
-  },
-];
-
-const UNSUPPORTED_FAMILIARITY_CAUSALITY = /(?:익숙한|낯익은|새로운|낯선).{0,24}(?:라서|이어서|이므로|때문에).{0,28}(?:더\s*)?(?:안정|좋|낫|적합|유리)|(?:familiar|new|unfamiliar).{0,30}(?:therefore|because|so).{0,30}(?:better|safer|more suitable)/iu;
-
-const PHYSICAL_FOOD_POSITION = /포만|영양|소화|에너지|식욕|건강/;
-const PHYSICAL_CARD_REFERENCE = /카드|타로|상징/;
-const PHYSICAL_ATTRIBUTE = /포만감|영양|소화|에너지|식욕|신체/;
-const PHYSICAL_NEGATIVE_JUDGMENT = /(?:(?:예측|판단|측정|보장|확인)(?:할)?\s*수(?:는)?\s*없|(?:예측|판단|측정|보장|확인)(?:하|되)지\s*(?:않|못)|(?:예측|판단|측정|보장|확인)하기\s*어렵|알\s*수(?:는)?\s*없|알기\s*어렵)/;
-
-export function isPhysicalFoodPosition(positionTitle: string, positionFocus: string): boolean {
-  return PHYSICAL_FOOD_POSITION.test(`${positionTitle} ${positionFocus}`);
-}
-
-function hasPhysicalLimitStatement(value: string): boolean {
-  if (!PHYSICAL_CARD_REFERENCE.test(value)) return false;
-  return value
-    .split(/[.!?]\s*|\n+/u)
-    .some((sentence) => PHYSICAL_ATTRIBUTE.test(sentence) && PHYSICAL_NEGATIVE_JUDGMENT.test(sentence));
-}
 
 export function detectEverydayDomain(question: string): EverydayDomain | null {
   for (const [domain, pattern] of Object.entries(DOMAIN_PATTERNS) as Array<[EverydayDomain, RegExp]>) {
@@ -388,8 +367,8 @@ export function questionScopeGuide(question: string, language: ReadingLanguage):
   const domain = detectEverydayDomain(question);
   if (!domain) {
     return language === "ko"
-      ? "질문에 적힌 범위 안에서 해석한다. 열린 추천은 카드 공개 전 후보를 만들지 않고, 카드 해석 뒤 구체적인 답 하나만 제시한다. 언급되지 않은 현실 상황이나 객관적 사실은 만들어내지 않는다."
-      : "Stay within the question's scope. For an open recommendation, do not create candidates before the cards are revealed; name one concrete answer only after interpreting the cards. Do not invent circumstances or objective facts.";
+      ? "질문에 적힌 범위 안에서 해석한다. 열린 추천은 카드 공개 전 후보를 만들지 않고, 카드 해석 뒤 구체적인 답 하나만 제시한다. 카드 상징에서 읽히는 취향·감정·결과·상황은 질문에 맞게 자유롭게 추론한다."
+      : "Stay within the question's scope. For an open recommendation, do not create candidates before the cards are revealed; name one concrete answer only after interpreting the cards. Freely infer preferences, emotions, outcomes, and circumstances from the card symbolism when they answer the question.";
   }
 
   if (language !== "ko") {
@@ -397,9 +376,9 @@ export function questionScopeGuide(question: string, language: ReadingLanguage):
   }
 
   return ({
-    food: "식사에 관한 작은 일상 질문이다. 요청한 메뉴 선택이나 추천을 먼저 직접 답하고, 질문에 없는 영양·맛·신체 상태를 사실로 만들지 않는다.",
-    outfit: "옷차림에 관한 작은 일상 질문이다. 요청한 선택이나 추천을 먼저 직접 답하고, 질문에 없는 날씨·일정·신체 상태를 사실로 만들지 않는다.",
-    schedule: "일정에 관한 작은 일상 질문이다. 요청한 우선순위나 행동을 먼저 직접 답하고, 질문에 없는 마감·약속·외부 조건을 사실로 만들지 않는다.",
+    food: "식사에 관한 작은 일상 질문이다. 요청한 메뉴 선택이나 추천을 먼저 직접 답하고, 카드 상징을 맛·취향·포만감·영양·몸 상태와 자연스럽게 연결해 해석한다.",
+    outfit: "옷차림에 관한 작은 일상 질문이다. 요청한 선택이나 추천을 먼저 직접 답하고, 카드 상징을 날씨·일정·분위기·착용감과 자연스럽게 연결해 해석한다.",
+    schedule: "일정에 관한 작은 일상 질문이다. 요청한 우선순위나 행동을 먼저 직접 답하고, 카드 상징을 마감·약속·집중도·외부 조건과 자연스럽게 연결해 해석한다.",
   })[domain];
 }
 
@@ -407,13 +386,13 @@ export function concreteWritingGuide(question: string, language: ReadingLanguage
   if (language !== "ko") return "Use concrete nouns and actions from the question in every interpretation section.";
   const domain = detectEverydayDomain(question);
   if (domain === "food") {
-    return `sourceMeaning에는 카드 원뜻을 보존한다. 그 밖의 문장에서는 추상어를 줄이고, 질문의 식사 대상과 고른다·먹는다·확인한다 같은 실제 행동을 사용한다. 질문에 없는 음식 속성을 새 근거로 만들지 않는다.`;
+    return "sourceMeaning에는 카드 원뜻을 보존한다. 그 밖의 문장에서는 추상어를 줄이고, 질문의 식사 대상과 고른다·먹는다 같은 실제 행동을 사용한다. 카드 상징을 맛·취향·포만감·영양·몸 상태와 구체적으로 연결할 수 있다.";
   }
   if (domain === "outfit") {
-    return "카드의 추상어를 질문에 나온 옷차림 대상과 고른다·입는다·챙긴다 같은 실제 행동으로 바꿔 쓴다. 질문에 없는 날씨나 외출 목적을 만들지 않는다.";
+    return "카드의 추상어를 질문에 나온 옷차림 대상과 고른다·입는다·챙긴다 같은 실제 행동으로 바꿔 쓴다. 카드 상징을 날씨·외출 목적·분위기·착용감과 구체적으로 연결할 수 있다.";
   }
   if (domain === "schedule") {
-    return "카드의 추상어를 질문에 나온 일정 대상과 시작한다·미룬다·확인한다 같은 실제 행동으로 바꿔 쓴다. 질문에 없는 마감이나 약속을 만들지 않는다.";
+    return "카드의 추상어를 질문에 나온 일정 대상과 시작한다·미룬다·확인한다 같은 실제 행동으로 바꿔 쓴다. 카드 상징을 마감·약속·집중도·외부 조건과 구체적으로 연결할 수 있다.";
   }
   return "질문의 명사를 되풀이하기만 하지 말고, 카드가 어떤 판단 기준이나 행동으로 이어지는지 구체적으로 쓴다.";
 }
@@ -526,17 +505,15 @@ export function enforcePlanQuality(
     if (/(?:후보|선택지)(?:인|은|는|로)\s*\S+|(?:candidates?|options?)\s*(?:are|include|:|such\s+as)/iu.test(preselectedOptionText)) {
       throw new Error("열린 추천의 구성 문구 전체에서 카드 공개 전 후보나 선택지를 제시하지 말아야 한다.");
     }
+    const roleMarker = context.language === "ko"
+      ? /신호|단서|주의|흐름|기준|영향|상황|가능성|보정|결정|선택|관점|조건|도움|지원|핵심|최종/
+      : /signal|clue|caution|flow|criterion|impact|situation|possibility|adjustment|decision|choice|focus|condition|support|final/i;
+    if (plan.positions.some((position) => !roleMarker.test(position.title))) {
+      throw new Error("열린 추천의 카드 자리 이름은 구체 후보명이 아니라 해석할 역할임을 드러내야 한다.");
+    }
   }
 
   const domain = detectEverydayDomain(context.question);
-  if (context.language === "ko" && candidateMode && domain === "food") {
-    const planText = orderedPositions.map((position) => `${position.title} ${position.focus}`).join(" ");
-    const inventedPhysicalTerm = ["맛", "맵", "포만", "영양", "소화", "칼로리", "재료", "조리", "가격", "비용", "시간"]
-      .find((term) => planText.includes(term) && !context.question.includes(term));
-    if (inventedPhysicalTerm) {
-      throw new Error("후보 비교 자리에서 질문에 없는 음식의 맛·영양·조리 특성을 예측 기준으로 만들지 말아야 한다.");
-    }
-  }
   if (context.language === "ko" && domain && !candidateMode) {
     const anchor = KOREAN_DOMAIN_ANCHORS[domain];
     if (!anchor.test(plan.interpretationFrame)) {
@@ -676,7 +653,6 @@ export function polishReadingLanguage(
       label: polish(axis.label),
       evidence: polish(axis.evidence),
     })),
-    limitation: polish(result.limitation),
   };
 }
 
@@ -725,7 +701,7 @@ export function enforceReadingQuality(
         issues.push(`${expected.cardName}의 원뜻이 질문과 연결되는 이유를 두 문장 정도로 설명해야 한다.`);
       }
       if (decisionImpact.trim().length < 30) {
-        issues.push(`${expected.cardName}이 실제 판단에 미치는 영향과 한계를 설명해야 한다.`);
+        issues.push(`${expected.cardName}이 실제 판단에 미치는 방향과 강도를 설명해야 한다.`);
       }
     });
   }
@@ -770,27 +746,6 @@ export function enforceReadingQuality(
   ].filter((value): value is string => Boolean(value)).join("\n");
   const domain = resolveEverydayDomain(context.question, context.conversation);
   const binaryChoices = context.answerContract ? null : extractBinaryChoices(context.question);
-  const candidateComparison = Boolean(binaryChoices
-    || (context.answerContract
-      && CONTRACT_CANDIDATE_KINDS.has(context.answerContract.kind)
-      && context.answerContract.candidates.length >= 2));
-  const unsupportedFamiliarityClaim = visibleText.match(UNSUPPORTED_FAMILIARITY_CAUSALITY)?.[0];
-  if (unsupportedFamiliarityClaim) {
-    issues.push(`사용자 경험을 확인하지 않은 친숙함·새로움의 인과관계 "${unsupportedFamiliarityClaim}"을 만들지 말아야 한다.`);
-  }
-  const checksSpecificRecommendationClaims = candidateComparison;
-  if (checksSpecificRecommendationClaims) {
-    const suppliedCandidateContext = [
-      scopeQuestion,
-      ...(expectedCards?.flatMap((card) => [card.positionTitle, card.positionFocus]) ?? []),
-    ].join(" ");
-    for (const assumption of CANDIDATE_OPTION_ASSUMPTIONS) {
-      const match = visibleText.match(assumption.output)?.[0];
-      if (match && !assumption.allowedByQuestion.test(suppliedCandidateContext)) {
-        issues.push(`후보에 관해 제공되지 않은 현실 특성 "${match}"을 만들어내지 말아야 한다.`);
-      }
-    }
-  }
   if (binaryChoices) {
     const verdict = findDirectChoiceVerdict(result.summary, binaryChoices);
     if (!verdict) {
@@ -847,27 +802,6 @@ export function enforceReadingQuality(
       issues.push(`카드 ${ungroundedCards.join(", ")}의 결론, 질문 연결 이유, 판단 영향을 질문 대상에 직접 연결해야 한다.`);
     }
 
-    if (domain === "food") {
-      const unsupportedClaim = UNSUPPORTED_FOOD_CAUSALITY
-        .map((pattern) => visibleText.match(pattern)?.[0])
-        .find(Boolean);
-      if (unsupportedClaim) {
-        issues.push(`근거 없는 식사 인과관계 "${unsupportedClaim}"을 만들지 말아야 한다. 준비 편의와 포만감은 별도 기준으로 설명한다.`);
-      }
-      const suppliedFoodContext = [
-        scopeQuestion,
-        ...(expectedCards?.flatMap((card) => [card.positionTitle, card.positionFocus]) ?? []),
-      ].join(" ");
-      for (const assumption of FOOD_SPECIFIC_ASSUMPTIONS) {
-        const match = visibleText.match(assumption.output)?.[0];
-        const allowedAsSymbolicProposal = context.answerContract?.kind === "recommend_one"
-          && assumption.symbolicRecommendation;
-        if (match && !allowedAsSymbolicProposal && !assumption.allowedByQuestion.test(suppliedFoodContext)) {
-          issues.push(`질문에 없는 음식 특성 "${match}"을 만들어내지 말아야 한다.`);
-        }
-      }
-    }
-
     const axisText = result.axes.map((axis) => `${axis.label} ${axis.evidence}`).join(" ");
     if (context.answerContract && CONTRACT_CANDIDATE_KINDS.has(context.answerContract.kind)) {
       const representedCandidates = contractCandidates.filter((candidate) => normalize(axisText).includes(normalize(candidate)));
@@ -892,15 +826,6 @@ export function enforceReadingQuality(
       }
       if (!normalize(actual.reasoning.questionConnection).includes(normalize(expected.positionTitle))) {
         issues.push(`${expected.cardName}의 질문 연결 이유에 자리 이름 "${expected.positionTitle}"을 직접 써야 한다.`);
-      }
-      if (
-        domain === "food"
-        && isPhysicalFoodPosition(expected.positionTitle, expected.positionFocus)
-      ) {
-        const physicalReasoning = `${actual.reasoning.questionConnection} ${actual.reasoning.decisionImpact}`;
-        if (!hasPhysicalLimitStatement(physicalReasoning)) {
-          issues.push(`${expected.cardName} 해석에서 카드가 실제 포만감·영양 상태를 예측할 수 없다는 경계를 명시해야 한다.`);
-        }
       }
     });
 

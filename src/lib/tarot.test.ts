@@ -227,7 +227,6 @@ describe("reading design and interpretation", () => {
 
     expect(plan.positions[0].title).toMatch(/[A-Za-z]/);
     expect(result.summary).toMatch(/[A-Za-z]/);
-    expect(result.limitation).toContain("probabilities");
     expect(readingResultSchema.parse(result)).toEqual(result);
     expect(tarotApiRequestSchema.parse({ action: "plan", question, language: "en" }).language).toBe("en");
   });
@@ -240,6 +239,11 @@ describe("reading design and interpretation", () => {
     ["연락할까 말까?", "yes_no"],
     ["지금 연락할까?", "yes_no"],
     ["이직하는 게 좋을까?", "yes_no"],
+    ["강화에 성공할까?", "outcome"],
+    ["이번 시험에 합격할까?", "outcome"],
+    ["지원하면 붙을까?", "outcome"],
+    ["연락이 올까?", "outcome"],
+    ["이번 강화는 실패할 가능성이 높을까?", "outcome"],
     ["A안과 B안 중 차이만 비교해줘", "compare"],
     ["A안이랑 B안의 차이를 비교해줘", "compare"],
     ["김치찌개랑 애호박찌개 중 뭐 먹을까?", "choose_one"],
@@ -252,6 +256,7 @@ describe("reading design and interpretation", () => {
     ["왜 연락할까 말까 계속 고민될까?", "explain"],
     ["이 문제를 어떻게 풀어야 해?", "advice"],
     ["이직 시기는 언제쯤일까?", "forecast"],
+    ["언제 성공할까?", "forecast"],
     ["현재 관계의 핵심 흐름을 봐줘", "analysis"],
     ["Should I call or text?", "choose_one"],
     ["Tea or coffee — which one should I choose?", "choose_one"],
@@ -266,6 +271,21 @@ describe("reading design and interpretation", () => {
     ["A, B, or C: which should I pick?", "choose_one"],
   ])("classifies the requested answer shape for %s", (question, kind) => {
     expect(createAnswerContract(question).kind).toBe(kind);
+  });
+
+  it("uses question-shaped role cards for an outcome instead of preselecting yes and no", () => {
+    const plan = designReading("강화에 성공할까?");
+
+    expect(plan.answerContract).toEqual({
+      kind: "outcome",
+      subject: "강화에 성공할까?",
+      candidates: [],
+      decisive: true,
+    });
+    expect(plan.cardCount).toBeGreaterThanOrEqual(1);
+    expect(plan.cardCount).toBeLessThanOrEqual(5);
+    expect(plan.positions.every((position) => !/예 선택|아니요 선택/.test(position.title))).toBe(true);
+    expect(readingPlanSchema.parse(plan)).toEqual(plan);
   });
 
   it("keeps an open recommendation unbounded until the cards are revealed", () => {

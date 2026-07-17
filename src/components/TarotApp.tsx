@@ -175,8 +175,6 @@ function resultText(question: string, result: ReadingResult, language: AppLangua
     `${language === "ko" ? "종합" : "Synthesis"}: ${result.synthesis}`,
     "",
     `${language === "ko" ? "확인할 점" : "Points to check"}\n${result.guidance.map((item) => `- ${item}`).join("\n")}`,
-    "",
-    result.limitation,
   ].join("\n");
 }
 
@@ -422,7 +420,6 @@ function ReadingExport({
         </div>
       </section>
 
-      <footer className="reading-export-footer">{result.limitation}</footer>
     </article>
   );
 }
@@ -1493,9 +1490,6 @@ export function TarotApp() {
                   </div>
                 ) : null}
               </div>
-              <footer className="console-footer">
-                <p>{result.limitation}</p>
-              </footer>
             </section>
 
             <div className="result-command-bar">

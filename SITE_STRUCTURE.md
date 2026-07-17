@@ -90,7 +90,7 @@ AI 요청은 설계와 해석으로 분리한다.
 - `positions[].focus`
 - `interpretationFrame`
 - `selectionGuide`
-- `answerContract.kind`: `choose_one`, `recommend_one`, `yes_no`, `compare`, `forecast`, `advice`, `explain`, `analysis`
+- `answerContract.kind`: `choose_one`, `recommend_one`, `yes_no`, `outcome`, `compare`, `forecast`, `advice`, `explain`, `analysis`
 - `answerContract.subject`, `answerContract.candidates`, `answerContract.decisive` (`recommend_one`의 `candidates`는 항상 `[]`)
 
 ### 4.2 카드 해석
@@ -107,9 +107,8 @@ AI 요청은 설계와 해석으로 분리한다.
 - 확인할 점
 - 신호 분포: 지지, 주의, 불확실성
 - 질문별 3~5개 해석 축과 근거 카드
-- 타로 해석의 한계 문구
 
-`src/lib/schemas.ts`의 Zod 스키마가 요청과 응답 형태를 검증하고, `src/lib/reading-quality.ts`가 직접 답의 존재, 후보 보존, 첫 문장의 결론, 한국어 구체성, 카드 근거, 질문 범위 이탈과 내부 필드 노출을 검사한다. AI가 작성한 본문을 고정 문장으로 다시 만들지는 않는다. 카드 ID·방향·원뜻·원자료 표시는 서버 데이터로 고정하고, 품질 검사를 통과하지 못한 AI 응답만 오류 이유와 함께 제한된 횟수로 재시도한다.
+`src/lib/schemas.ts`의 Zod 스키마가 요청과 응답 형태를 검증하고, `src/lib/reading-quality.ts`가 직접 답의 존재, 후보 보존, 첫 문장의 결론, 한국어 구체성, 카드 근거, 질문 범위 이탈과 내부 필드 노출을 검사한다. AI가 작성한 본문을 고정 문장으로 다시 만들지는 않는다. 카드 ID·방향·원뜻·원자료 표시는 서버 데이터로 고정하되, 취향·맛·포만감·영양·몸 상태·상대 감정·성공 여부와 미래 흐름은 카드 상징을 근거로 자유롭게 추론할 수 있다. 품질 검사를 통과하지 못한 AI 응답만 오류 이유와 함께 제한된 횟수로 재시도한다.
 
 후속 질문은 이전 질문을 문자열로 합치지 않고 `initialQuestion`, `previousQuestions`, `previousAnswer`, `previousContract`로 전달한다. 명시적 후보 선택 뒤의 “그래서 정확히 어느 쪽” 같은 질문은 이전 후보를 이어받는다. 열린 추천은 이전 후보 대신 이전에 생성된 답과 카드 문맥을 전달하며, 새로운 대상의 질문은 이전 후보나 그래프 축을 상속하지 않는다.
 

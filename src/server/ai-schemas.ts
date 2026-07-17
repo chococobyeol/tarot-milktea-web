@@ -4,6 +4,7 @@ const answerKinds = [
   "choose_one",
   "recommend_one",
   "yes_no",
+  "outcome",
   "compare",
   "forecast",
   "advice",
@@ -64,7 +65,6 @@ export const READING_RESULT_JSON_SCHEMA: AiJsonSchema = {
       "guidance",
       "axes",
       "signals",
-      "limitation",
     ],
     properties: {
       verdict: {
@@ -146,7 +146,6 @@ export const READING_RESULT_JSON_SCHEMA: AiJsonSchema = {
           uncertainty: { type: "integer" },
         },
       },
-      limitation: { type: "string" },
     },
   },
 };
