@@ -66,6 +66,10 @@ export default function PrivacyPage() {
             <li>질문과 AI 해석 결과는 서비스의 D1 데이터베이스에 저장하지 않습니다.</li>
             <li>필수 세션 쿠키는 최대 2시간 유효하며, 관련 익명 세션 기록은 만료 후 정리됩니다.</li>
             <li>운영 로그는 장애 확인과 보안을 위해 Cloudflare의 설정과 정책에 따라 단기간 보관될 수 있습니다.</li>
+            <li>
+              Groq는 일반 추론 요청의 입력·출력을 기본적으로 보관하지 않지만, 시스템 장애 확인이나 악용 조사에
+              필요한 경우 미국 소재 Google Cloud에 최대 30일간 임시 보관할 수 있습니다.
+            </li>
           </ul>
           <p>브라우저에 저장된 정보는 기록 메뉴 또는 브라우저의 사이트 데이터 삭제 기능으로 제거할 수 있습니다.</p>
         </PolicySection>
@@ -76,15 +80,22 @@ export default function PrivacyPage() {
             <li>
               <strong>Cloudflare</strong>: 웹 호스팅, API, D1, Workers AI, Turnstile, 요청 제한과 운영 로그
             </li>
+            <li>
+              <strong>Groq</strong>: Workers AI의 일일 사용 한도가 소진된 경우에만 카드 구성과 AI 해석 처리
+            </li>
             <li><strong>jsDelivr</strong>: 웹폰트 파일 제공</li>
           </ul>
           <p>
-            AI 해석을 위해 질문과 카드 정보가 Cloudflare Workers AI로 전송됩니다. 외부 서비스에서는
-            접속 정보와 요청 정보가 국외에서 처리될 수 있으며, 각 서비스의 정책이 적용됩니다.
+            AI 해석을 위해 질문과 카드 정보가 Cloudflare Workers AI로 전송됩니다. Workers AI의 일일
+            사용 한도가 소진된 경우에는 같은 정보와 현재 리딩 문맥이 Groq로 전송됩니다. 외부 서비스에서는
+            접속 정보와 요청 정보가 국외에서 처리될 수 있으며, 각 서비스의 정책이 적용됩니다. Groq 계정에서
+            Zero Data Retention을 활성화하면 신뢰성·악용 조사 목적의 고객 데이터 보관을 중지할 수 있습니다.
           </p>
           <p className="privacy-related-links">
             <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noreferrer">Cloudflare 개인정보 처리방침</a>
             <a href="https://developers.cloudflare.com/workers-ai/platform/data-usage/" target="_blank" rel="noreferrer">Workers AI 데이터 이용 안내</a>
+            <a href="https://groq.com/privacy-policy/" target="_blank" rel="noreferrer">Groq 개인정보 처리방침</a>
+            <a href="https://console.groq.com/docs/your-data" target="_blank" rel="noreferrer">Groq 데이터 이용 안내</a>
           </p>
         </PolicySection>
 

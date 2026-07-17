@@ -7,7 +7,7 @@
 - 앱: [https://tarot-milktea.cha-amu.workers.dev](https://tarot-milktea.cha-amu.workers.dev)
 - 공개 소스: [https://github.com/chococobyeol/tarot-milktea-web](https://github.com/chococobyeol/tarot-milktea-web)
 
-정적 화면과 같은 출처의 API를 하나의 Cloudflare Worker로 배포했습니다. 질문 구성과 카드 해석은 Workers AI, 익명 세션의 사용량 카운터는 D1을 사용합니다.
+정적 화면과 같은 출처의 API를 하나의 Cloudflare Worker로 배포했습니다. 질문 구성과 카드 해석은 Workers AI를 우선 사용하고, 일일 무료 한도가 소진된 경우에만 Groq의 Qwen 3.6 27B 구성 모델과 GPT-OSS 120B 해석 모델로 전환합니다. 해석 보정이 필요하면 별도 분당 한도를 쓰는 GPT-OSS 20B가 한 번만 재검사합니다. 익명 세션의 사용량 카운터는 D1을 사용합니다.
 
 ## 문서
 
@@ -24,7 +24,7 @@ npm install
 npm run dev
 ```
 
-기본 주소는 `http://localhost:3000`입니다. Wrangler에 Cloudflare 계정 로그인이 되어 있으면 로컬 개발에서도 `AI` 바인딩을 통해 실제 Workers AI를 호출합니다. 선택 후보가 이미 확정된 질문은 AI가 일시적으로 실패해도 같은 답변 계약을 사용하는 로컬 해석으로 공개 흐름을 이어 갑니다. 반면 열린 추천·전망·조언·설명·분석처럼 AI의 의미 판단이 필요한 질문은 AI를 사용할 수 없을 때 판에 박힌 답을 만들지 않고 재시도를 안내합니다. 로컬 Workers AI 호출도 계정 사용량에 포함됩니다.
+기본 주소는 `http://localhost:3000`입니다. Wrangler에 Cloudflare 계정 로그인이 되어 있으면 로컬 개발에서도 `AI` 바인딩을 통해 실제 Workers AI를 호출합니다. `GROQ_API_KEY`가 서버 비밀값으로 설정된 환경에서는 Workers AI가 정확한 일일 한도 초과 오류를 반환할 때만 Groq를 사용합니다. 선택 후보가 이미 확정된 질문은 AI가 일시적으로 실패해도 같은 답변 계약을 사용하는 로컬 해석으로 공개 흐름을 이어 갑니다. 반면 열린 추천·전망·조언·설명·분석처럼 AI의 의미 판단이 필요한 질문은 AI를 사용할 수 없을 때 판에 박힌 답을 만들지 않고 재시도를 안내합니다. 로컬 Workers AI 호출도 계정 사용량에 포함됩니다.
 
 ## 확인 명령
 
@@ -42,11 +42,12 @@ npm run db:generate
 - D1 바인딩: `DB`
 - 비밀값 `SESSION_SECRET`: 충분히 긴 무작위 문자열
 - 비밀값 `TURNSTILE_SECRET`: Turnstile secret key
+- 비밀값 `GROQ_API_KEY`: Workers AI 일일 한도 소진 시 사용하는 Groq 서버 키
 - 공개 빌드값 `NEXT_PUBLIC_TURNSTILE_SITE_KEY`: `vite.config.ts`의 운영 Turnstile site key (환경값으로 재정의 가능)
 - Rate Limiting 바인딩 `SESSION_RATE_LIMITER`: 세션 기준 분당 10회
 - Rate Limiting 바인딩 `NETWORK_RATE_LIMITER`: 네트워크 기준 분당 30회
 
-Turnstile site key는 브라우저에 공개되는 식별자이므로 빌드 설정에 포함합니다. `SESSION_SECRET`과 `TURNSTILE_SECRET`은 Cloudflare의 암호화된 Worker secret으로만 저장합니다. 계정 식별자와 로컬 배포 설정도 저장소에 넣지 않으며 `.wrangler/` 전체를 Git에서 제외합니다. 운영 상태와 검증 기록은 `PROJECT_PLAN.md`에 정리합니다.
+Turnstile site key는 브라우저에 공개되는 식별자이므로 빌드 설정에 포함합니다. `SESSION_SECRET`, `TURNSTILE_SECRET`, `GROQ_API_KEY`는 Cloudflare의 암호화된 Worker secret으로만 저장합니다. 계정 식별자와 로컬 배포 설정도 저장소에 넣지 않으며 `.wrangler/` 전체를 Git에서 제외합니다. 운영 상태와 검증 기록은 `PROJECT_PLAN.md`에 정리합니다.
 
 ## 데이터와 저장 범위
 

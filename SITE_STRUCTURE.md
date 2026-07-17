@@ -15,7 +15,7 @@
 - JS, CSS, 카드 이미지: Worker 정적 자산
 - AI API: `/api/tarot`
 - 익명 세션 API: `/api/session`
-- AI 추론: Cloudflare Workers AI
+- AI 추론: Cloudflare Workers AI 우선, 일일 한도 소진 시 Groq
 - 익명 세션 카운터: Cloudflare D1
 - 봇 감지: Cloudflare Turnstile
 - 과다 요청 방지: Cloudflare Rate Limiting + D1 세션 상한
@@ -28,7 +28,8 @@
   ├─ 화면 자산 ───────────────> Worker 정적 자산
   ├─ POST /api/session ───────> Turnstile 검증 ─> 익명 쿠키 + D1 카운터
   └─ POST /api/tarot ─────────> 요청 검증/사용량 제한 ─> Workers AI
-                                └─ 구조화 JSON 응답
+                                ├─ 정상 ────────────────> 구조화 JSON 응답
+                                └─ 일일 한도 소진 ─────> Groq ─> 구조화 JSON 응답
 ```
 
 ## 2. 라우트
@@ -79,7 +80,7 @@ AI 요청은 설계와 해석으로 분리한다.
 
 ### 4.1 카드 구성
 
-브라우저가 질문, 후속 질문 여부, 언어와 이전 답변 문맥을 `/api/tarot`에 보낸다. 서버는 질문 범위와 카드 수를 검증한 뒤 Workers AI에 1~5장의 자리 구성과 `answerContract`를 요청한다. 일반 질문의 의미 분류와 열린 추천 후보는 AI가 결정한다. 서버의 로컬 분류기는 AI를 사용할 수 없을 때 보조하고, 사용자가 “추천”, “왜”, “비교”처럼 요구 형태를 명시한 경우의 계약 오류만 제한적으로 검사한다. 사용자가 질문에 직접 적은 2~5개 선택지는 AI가 다른 후보로 바꾸지 못하도록 서버가 보존한다.
+브라우저가 질문, 후속 질문 여부, 언어와 이전 답변 문맥을 `/api/tarot`에 보낸다. 서버는 질문 범위와 카드 수를 검증한 뒤 Workers AI에 1~5장의 자리 구성과 `answerContract`를 요청한다. Workers AI가 정확한 일일 무료 한도 초과 오류를 반환하고 `GROQ_API_KEY`가 설정된 경우에만 Groq의 `qwen/qwen3.6-27b`로 같은 요청을 전환한다. 이 모델은 추론 출력을 끈 JSON Object Mode 응답을 만들고 기존 Zod·품질 검사를 그대로 통과해야 한다. 일반 장애, 용량 부족, 품질 검사 실패에는 공급자를 바꾸지 않는다. 일반 질문의 의미 분류와 열린 추천 후보는 AI가 결정한다. 서버의 로컬 분류기는 AI를 사용할 수 없을 때 보조하고, 사용자가 “추천”, “왜”, “비교”처럼 요구 형태를 명시한 경우의 계약 오류만 제한적으로 검사한다. 원인·이유처럼 답의 형식이 명확한 질문 안에 후보처럼 보이는 구절이 있더라도 선택 질문으로 바꾸지 않는다. 사용자가 질문에 직접 적은 2~5개 선택지는 AI가 다른 후보로 바꾸지 못하도록 서버가 보존한다.
 
 응답 주요 필드:
 
@@ -95,6 +96,8 @@ AI 요청은 설계와 해석으로 분리한다.
 ### 4.2 카드 해석
 
 브라우저가 질문, 선택 카드 ID, 정·역방향, 자리, 설계 단계의 `answerContract`, 이전 결과와 구조화된 후속 질문 문맥을 전송한다. 서버는 선택된 카드의 로컬 의미 데이터만 프롬프트에 추가한다.
+
+해석도 Workers AI를 우선 사용하고, 일일 한도 소진 시에만 Groq의 `openai/gpt-oss-120b`로 전환한다. Groq 응답에는 Strict JSON Schema를 적용하고 기존 Zod 스키마와 해석 품질 검사를 다시 통과시킨다. 첫 응답이 스키마 또는 품질 검사를 통과하지 못한 경우에만 별도 모델 한도를 쓰는 `openai/gpt-oss-20b`로 한 번 보정한다. Groq의 분당 토큰 한도를 고려해 각 해석 출력 상한은 2,600토큰으로 제한하며, 429·인증·요청 오류에는 반복 재시도하지 않는다.
 
 응답 주요 필드:
 
@@ -120,8 +123,9 @@ AI 요청은 설계와 해석으로 분리한다.
 | 필수 쿠키 | 서명된 무작위 익명 세션 | 최대 2시간 |
 | D1 | 세션 ID 해시, 생성·만료 시각, AI 호출 수, 추가 질문 수 | 유효기간 2시간, 만료 행은 이후 새 세션 생성 때 정리 |
 | Workers AI | 질문과 카드 문맥을 요청 처리 중 사용 | 앱이 별도 AI 콘텐츠 저장소에 보관하지 않음 |
+| Groq | Workers AI 일일 한도 소진 시 질문과 카드 문맥을 요청 처리 중 사용 | 기본 추론 요청은 미보관. 신뢰성·악용 조사 시 미국 GCP에 최대 30일 임시 보관 가능하며 계정에서 ZDR 설정 가능 |
 
-닉네임은 서버와 Workers AI에 보내지 않는다. 질문과 AI 결과는 현재 리딩 복구를 위해 `sessionStorage`에 들어가며, 사용자가 `저장`을 눌렀을 때만 별도 IndexedDB 기록이 생성된다. 앱의 D1에는 질문, 닉네임, 선택 카드 또는 AI 결과를 저장하지 않는다.
+닉네임은 서버와 AI 공급자에 보내지 않는다. 질문과 AI 결과는 현재 리딩 복구를 위해 `sessionStorage`에 들어가며, 사용자가 `저장`을 눌렀을 때만 별도 IndexedDB 기록이 생성된다. 앱의 D1에는 질문, 닉네임, 선택 카드 또는 AI 결과를 저장하지 않는다.
 
 개인정보 처리의 전체 설명은 `/privacy` 페이지를 기준으로 한다. 저장 위치나 외부 서비스가 바뀌면 코드, 이 문서와 개인정보 처리방침을 같은 변경에서 함께 갱신한다.
 
@@ -139,7 +143,7 @@ AI 요청은 설계와 해석으로 분리한다.
 - 카드 ID, 중복 선택, 라운드별 최대 5장 서버 재검증
 - API 응답과 오류에 `cache-control: no-store`
 
-브라우저에 공개되는 Turnstile site key 외에 `SESSION_SECRET`, `TURNSTILE_SECRET` 같은 비밀값은 Worker secret으로만 관리한다. 문서와 저장소에는 실제 비밀값, 계정 ID 또는 배포 자격증명을 기록하지 않는다.
+브라우저에 공개되는 Turnstile site key 외에 `SESSION_SECRET`, `TURNSTILE_SECRET`, `GROQ_API_KEY` 같은 비밀값은 Worker secret으로만 관리한다. 문서와 저장소에는 실제 비밀값, 계정 ID 또는 배포 자격증명을 기록하지 않는다.
 
 ## 7. 주요 파일 지도
 
@@ -163,6 +167,8 @@ src/
   lib/storage.ts             IndexedDB 읽기·쓰기·삭제
   lib/tarot.ts               덱, 카드 데이터와 로컬 해석
   lib/reading-quality.ts     AI 해석 품질 검사와 문장 보정
+  server/ai-provider.ts      Workers AI 한도 감지와 Groq 조건부 전환
+  server/ai-schemas.ts       Groq Strict JSON Schema
   server/security.ts         세션, Turnstile, Rate Limiting, D1
 
 public/cards/                운영 카드 이미지
@@ -181,6 +187,7 @@ tests/                       서버 렌더링·운영 빌드 검사
 | `ASSETS` | 정적 클라이언트 자산 |
 | `SESSION_RATE_LIMITER` | 서명 세션 기준 단기 제한 |
 | `NETWORK_RATE_LIMITER` | 익명화한 네트워크 기준 단기 제한 |
+| `GROQ_API_KEY` | Workers AI 일일 한도 소진 시 사용하는 암호화된 서버 비밀값 |
 
 배포용 실제 리소스 식별자와 secret은 로컬 전용 설정 또는 Cloudflare에만 둔다.
 

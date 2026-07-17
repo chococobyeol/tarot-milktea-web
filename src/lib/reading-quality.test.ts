@@ -254,6 +254,27 @@ describe("enforceReadingQuality", () => {
     })).toThrow(/답변 유형은 recommend_one/);
   });
 
+  it("does not turn phrases inside an explicit cause question into choices", () => {
+    expect(() => enforcePlanQuality({
+      cardCount: 2,
+      interpretationFrame: "새로운 사람들과 가까워지는 문제를 비교해요.",
+      selectionGuide: "후보별 카드를 골라요.",
+      positions: [
+        { id: "people", title: "요즘 새로운 사람들", focus: "첫 후보" },
+        { id: "closeness", title: "가까워지기 어려운", focus: "둘째 후보" },
+      ],
+      answerContract: {
+        kind: "choose_one",
+        subject: "새로운 사람들과 가까워지기 어려운 중심 원인",
+        candidates: ["요즘 새로운 사람들", "가까워지기 어려운"],
+        decisive: true,
+      },
+    }, {
+      question: "내가 요즘 새로운 사람들과 가까워지기 어려운 중심 원인은 무엇일까?",
+      language: "ko",
+    })).toThrow(/답변 유형은 explain/);
+  });
+
   it("replaces invented physical criteria with candidate signal positions", () => {
     const plan = enforcePlanQuality({
       cardCount: 2,

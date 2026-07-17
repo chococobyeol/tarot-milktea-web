@@ -407,7 +407,12 @@ export function enforcePlanQuality(
 ): ReadingPlan {
   let contract = plan.answerContract ?? createAnswerContract(context.question, undefined, context.language);
   const expectedContract = createAnswerContract(context.question, context.conversation, context.language);
-  const candidatesWrittenInCurrentQuestion = extractChoiceCandidates(context.question);
+  // Candidate-like phrases inside a cause, forecast, or advice question are not choices.
+  // Only let extraction override the model when the deterministic answer contract itself
+  // says this is a candidate-based question.
+  const candidatesWrittenInCurrentQuestion = CONTRACT_CANDIDATE_KINDS.has(expectedContract.kind)
+    ? extractChoiceCandidates(context.question)
+    : null;
   const inheritedCandidates = !candidatesWrittenInCurrentQuestion
     && (expectedContract.kind === "choose_one" || expectedContract.kind === "compare")
     ? expectedContract.candidates

@@ -31,6 +31,16 @@ import {
   tarotApiRequestSchema,
 } from "@/src/lib/schemas";
 import {
+  READING_PLAN_JSON_SCHEMA,
+  READING_RESULT_JSON_SCHEMA,
+} from "@/src/server/ai-schemas";
+import {
+  AiProviderError,
+  createQuotaFallbackAiProvider,
+  type AiJsonProvider,
+  type AiJsonSchema,
+} from "@/src/server/ai-provider";
+import {
   ApiError,
   apiErrorResponse,
   completeFollowup,
@@ -40,7 +50,11 @@ import {
   type WorkersAIBinding,
 } from "@/src/server/security";
 
-const MODEL = "@cf/google/gemma-4-26b-a4b-it";
+const WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
+const GROQ_PLAN_MODEL = "qwen/qwen3.6-27b";
+const GROQ_INTERPRETATION_MODEL = "openai/gpt-oss-120b";
+const GROQ_INTERPRETATION_CORRECTION_MODEL = "openai/gpt-oss-20b";
+const GROQ_INTERPRETATION_MAX_TOKENS = 2_600;
 
 const SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
 - 요청에서 지정한 출력 언어로 중립적이고 분석적인 문장을 쓴다.
@@ -253,21 +267,55 @@ export function stabilizeAnswerContractReading(
 }
 
 function classifyAiFailure(error: unknown): string {
+  if (error instanceof AiProviderError) {
+    return `${error.provider.toUpperCase().replace("-", "_")}_${error.kind.toUpperCase()}`;
+  }
   if (error instanceof SyntaxError) return "INVALID_JSON";
   if (error && typeof error === "object" && "issues" in error) return "SCHEMA_VALIDATION_FAILED";
 
   const message = error instanceof Error ? error.message : "";
-  if (/quota|neuron|daily limit|usage limit/i.test(message)) return "PROVIDER_LIMIT";
   if (/비어|empty response/i.test(message)) return "EMPTY_RESPONSE";
   if (/network|fetch|timeout|connection/i.test(message)) return "PROVIDER_REQUEST_FAILED";
   return "QUALITY_VALIDATION_FAILED";
 }
 
+function providerApiError(error: AiProviderError): ApiError {
+  if (error.provider === "workers-ai" && error.kind === "daily_limit") {
+    return new ApiError(
+      503,
+      "DAILY_AI_LIMIT",
+      "오늘 AI 사용 한도를 모두 사용했습니다. 한국 시간 오전 9시 이후 다시 시도하세요.",
+    );
+  }
+  if (error.provider === "groq" && error.kind === "rate_limit") {
+    return new ApiError(
+      503,
+      "BACKUP_AI_RATE_LIMIT",
+      "대체 AI의 현재 사용 한도에 도달했습니다. 잠시 후 다시 시도하세요.",
+      error.retryAfter,
+    );
+  }
+  if (error.provider === "groq" && error.kind === "invalid_response") {
+    return new ApiError(
+      502,
+      "INVALID_AI_RESPONSE",
+      "AI 응답 형식을 확인하지 못했습니다. 현재 상태를 유지하고 다시 시도하세요.",
+    );
+  }
+  return new ApiError(
+    503,
+    "BACKUP_AI_UNAVAILABLE",
+    "대체 AI에 연결하지 못했습니다. 현재 상태를 유지하고 잠시 후 다시 시도하세요.",
+    error.retryAfter,
+  );
+}
+
 async function runAiJson<T>(
-  ai: WorkersAIBinding,
+  provider: AiJsonProvider,
   prompt: string,
   validate: (value: unknown) => T,
   maxTokens: number,
+  jsonSchema: AiJsonSchema,
   maxAttempts = 2,
 ): Promise<T> {
   let lastError: unknown;
@@ -276,15 +324,12 @@ async function runAiJson<T>(
       const userPrompt = attempt === 0
         ? prompt
         : `${prompt}\n이전 응답 문제: ${lastError instanceof Error ? lastError.message.replace(/\s+/g, " ").slice(0, 900) : "출력 품질 또는 JSON 형식이 기준에 맞지 않았다."}\n지적된 문제를 모두 고쳐 필수 필드를 포함한 JSON만 다시 출력하라.`;
-      const result = await ai.run(MODEL, {
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: maxTokens,
+      const result = await provider.run({
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt,
+        maxTokens,
         temperature: 0.25,
-        response_format: { type: "json_object" },
-        chat_template_kwargs: { enable_thinking: false },
+        jsonSchema,
       });
       const responseText = extractResponseText(result);
       return validate(parseJsonText(responseText));
@@ -294,22 +339,53 @@ async function runAiJson<T>(
         attempt: attempt + 1,
         category: classifyAiFailure(error),
       });
+      if (error instanceof AiProviderError && !error.retryable) {
+        throw providerApiError(error);
+      }
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
-  if (/quota|neuron|daily limit|usage limit/i.test(message)) {
-    throw new ApiError(503, "DAILY_AI_LIMIT", "오늘 AI 사용 한도를 모두 사용했습니다. 한국 시간 오전 9시 이후 다시 시도하세요.");
-  }
+  if (lastError instanceof AiProviderError) throw providerApiError(lastError);
   throw new ApiError(502, "INVALID_AI_RESPONSE", "AI 응답 형식을 확인하지 못했습니다. 현재 상태를 유지하고 다시 시도하세요.");
 }
 
-async function createAiPlan(
+function createReadingAiProvider(
+  ai: WorkersAIBinding,
+  groqApiKey: string | undefined,
+  groqModel: string,
+  groqMaxTokens: number,
+  groqStrictJsonSchema: boolean,
+  groqCorrectionModel?: string,
+  groqCorrectionMaxTokens?: number,
+  groqCorrectionStrictJsonSchema?: boolean,
+): AiJsonProvider {
+  return createQuotaFallbackAiProvider({
+    workersAi: ai,
+    workersModel: WORKERS_AI_MODEL,
+    groqApiKey,
+    groqModel,
+    groqMaxTokens,
+    groqStrictJsonSchema,
+    groqCorrectionModel,
+    groqCorrectionMaxTokens,
+    groqCorrectionStrictJsonSchema,
+    onFallback: () => {
+      console.warn("[tarot-ai] switching provider", {
+        from: "workers-ai",
+        to: "groq",
+        reason: "daily-limit",
+      });
+    },
+  });
+}
+
+export async function createAiPlan(
   ai: WorkersAIBinding,
   question: string,
   followup: boolean,
   language: ReadingLanguage,
   context?: ReadingContext,
+  groqApiKey?: string,
 ): Promise<ReadingPlan> {
   const localPlan = designReading(question, followup, language, context);
   const prompt = `다음 질문을 위한 ${followup ? "추가" : "최초"} 타로 리딩 구조를 설계하라.
@@ -335,7 +411,7 @@ answerContract.subject에는 지금 답해야 할 대상을 현재 질문의 핵
 
 카드 수는 질문의 범위에 따라 1~5장이다. 기본 권장 수는 ${localPlan.cardCount}장이지만 질문을 읽고 조정할 수 있다.
 choose_one, recommend_one, yes_no, compare는 후보마다 카드 한 장을 배정하므로 cardCount와 positions 길이를 candidates 길이와 같게 한다. 각 position의 title 또는 focus에 해당 후보 이름을 철자 그대로 넣는다.
-자리 역할은 질문에 실제로 답하는 구체적인 비교 기준으로 작성한다. "방향성", "외부 조건", "실행 가능성", "현재 상황"처럼 어느 질문에나 붙일 수 있는 제목은 피한다.
+자리 역할은 질문에 실제로 답하는 구체적인 비교 기준으로 작성한다. title마다 현재 질문의 핵심 명사나 행동을 직접 넣는다. "방향성", "외부 조건", "실행 가능성", "현재 상황", "현재 상태", "핵심 기준", "선택 기준", "조정 방향"처럼 어느 질문에나 붙일 수 있는 제목은 사용하지 않는다.
 짧은 일상 질문에서는 질문에 실제로 나온 대상과 행동을 중심으로 쓴다. 질문에 없는 현실 속성을 새 비교 기준으로 만들지 않는다.
 응답 JSON 스키마:
 {
@@ -347,13 +423,14 @@ choose_one, recommend_one, yes_no, compare는 후보마다 카드 한 장을 배
 }
 positions 길이는 cardCount와 같아야 한다.
 interpretationFrame은 자리 이름을 다시 나열하지 말고, 이번 리딩에서 무엇을 판단할지 한 문장으로 쓴다.`;
-  return runAiJson(ai, prompt, (value) => enforcePlanQuality(
+  const provider = createReadingAiProvider(ai, groqApiKey, GROQ_PLAN_MODEL, 900, false);
+  return runAiJson(provider, prompt, (value) => enforcePlanQuality(
     readingPlanSchema.parse(value),
     { question, language, conversation: context },
-  ), 900);
+  ), 900, READING_PLAN_JSON_SCHEMA);
 }
 
-async function createAiInterpretation(
+export async function createAiInterpretation(
   ai: WorkersAIBinding,
   question: string,
   cards: Parameters<typeof generateReadingResult>[1],
@@ -361,6 +438,7 @@ async function createAiInterpretation(
   language: ReadingLanguage = "ko",
   answerContract?: AnswerContract,
   context?: ReadingContext,
+  groqApiKey?: string,
 ): Promise<ReadingResult> {
   const contract = answerContract ?? createAnswerContract(question, context, language);
   const scopeQuestion = [
@@ -528,7 +606,17 @@ recommend_one에서는 candidates가 이미 질문에 맞게 생성된 구체적
 추가 질문이면 이전 해석을 반복하지 말고 변화한 판단과 새 카드의 영향에 집중한다.
 ${followupAxesGuide}
 ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 빠뜨리지 않는다.`;
-  return runAiJson(ai, prompt, (value) => {
+  const provider = createReadingAiProvider(
+    ai,
+    groqApiKey,
+    GROQ_INTERPRETATION_MODEL,
+    GROQ_INTERPRETATION_MAX_TOKENS,
+    true,
+    GROQ_INTERPRETATION_CORRECTION_MODEL,
+    GROQ_INTERPRETATION_MAX_TOKENS,
+    true,
+  );
+  return runAiJson(provider, prompt, (value) => {
     const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards, everydayDomain, language));
     const polished = polishReadingLanguage(parsed, question, language, everydayDomain);
     const finalized = readingResultSchema.parse(stabilizeAnswerContractReading(polished, contract, language));
@@ -536,7 +624,7 @@ ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 �
       finalized,
       { question, language, sourceSentences, expectedCards, answerContract: contract, conversation: context },
     );
-  }, everydayDomain ? 3600 : 4000, 2);
+  }, everydayDomain ? 3600 : 4000, READING_RESULT_JSON_SCHEMA, 2);
 }
 
 async function resolveAiOrLocal<T>(
@@ -555,7 +643,7 @@ async function resolveAiOrLocal<T>(
       return { data: localTask(), mode: "local" };
     } catch (fallbackError) {
       if (
-        error.code === "DAILY_AI_LIMIT"
+        ["DAILY_AI_LIMIT", "BACKUP_AI_RATE_LIMIT", "BACKUP_AI_UNAVAILABLE", "INVALID_AI_RESPONSE"].includes(error.code)
         && fallbackError instanceof ApiError
         && /^AI_.*_UNAVAILABLE$/.test(fallbackError.code)
       ) {
@@ -587,7 +675,14 @@ export async function POST(request: Request): Promise<Response> {
       const response = await resolveAiOrLocal(
         runtimeEnv.AI,
         "plan",
-        (ai) => createAiPlan(ai, input.question, input.followup, input.language, input.context),
+        (ai) => createAiPlan(
+          ai,
+          input.question,
+          input.followup,
+          input.language,
+          input.context,
+          runtimeEnv.GROQ_API_KEY,
+        ),
         () => {
           const plan = readingPlanSchema.parse(designReading(input.question, input.followup, input.language, input.context));
           if (!canUseContractFallback(plan.answerContract)) {
@@ -607,7 +702,16 @@ export async function POST(request: Request): Promise<Response> {
     const response = await resolveAiOrLocal(
       runtimeEnv.AI,
       "interpretation",
-      (ai) => createAiInterpretation(ai, input.question, input.cards, input.previous, input.language, effectiveContract, input.context),
+      (ai) => createAiInterpretation(
+        ai,
+        input.question,
+        input.cards,
+        input.previous,
+        input.language,
+        effectiveContract,
+        input.context,
+        runtimeEnv.GROQ_API_KEY,
+      ),
       () => {
         if (!canUseContractFallback(effectiveContract)) {
           throw new ApiError(503, "AI_INTERPRETATION_UNAVAILABLE", "질문을 충분히 해석할 AI를 현재 사용할 수 없습니다. 잠시 후 다시 시도하세요.");

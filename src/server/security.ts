@@ -14,6 +14,7 @@ export interface WorkersAIBinding {
 export interface RuntimeEnv {
   AI?: WorkersAIBinding;
   DB?: D1Database;
+  GROQ_API_KEY?: string;
   SESSION_SECRET?: string;
   TURNSTILE_SECRET?: string;
   SESSION_RATE_LIMITER?: RateLimitBinding;

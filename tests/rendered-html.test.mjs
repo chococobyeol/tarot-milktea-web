@@ -58,6 +58,8 @@ test("server-renders the privacy policy page", async () => {
   assert.match(html, /<title>개인정보 처리방침 \| 타로밀크티 웹<\/title>/);
   assert.match(html, /처리하는 정보/);
   assert.match(html, /Cloudflare Workers AI/);
+  assert.match(html, /Workers AI의 일일 사용 한도가 소진된 경우에는 같은 정보와 현재 리딩 문맥이 Groq로 전송됩니다/);
+  assert.match(html, /미국 소재 Google Cloud에 최대 30일간 임시 보관할 수 있습니다/);
   assert.match(html, /mailto:chaamu\.channel@gmail\.com/);
   assert.match(html, /href="\/"/);
 });
