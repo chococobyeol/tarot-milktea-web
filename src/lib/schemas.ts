@@ -25,13 +25,21 @@ export const answerContractSchema = z.object({
 }).superRefine((contract, context) => {
   const candidateKinds = new Set(["choose_one", "yes_no", "compare"]);
   if (!candidateKinds.has(contract.kind) && contract.candidates.length > 0) {
-    context.addIssue({ code: "custom", message: "이 답변 유형에는 선택 후보를 넣을 수 없습니다.", path: ["candidates"] });
+    context.addIssue({
+      code: "custom",
+      message: "candidates에는 사용자가 현재 선택할 수 있게 제시한 닫힌 후보 집합만 넣습니다. 이 답변 유형에서는 candidates를 비워야 합니다.",
+      path: ["candidates"],
+    });
   }
   if ((contract.kind === "choose_one" || contract.kind === "compare") && contract.candidates.length < 2) {
-    context.addIssue({ code: "custom", message: "명시 선택과 비교에는 사용자가 제시한 후보가 2개 이상 필요합니다.", path: ["candidates"] });
+    context.addIssue({
+      code: "custom",
+      message: "현재 선택 가능한 명시 후보가 2개 미만이면 choose_one이나 compare가 아닙니다. 후보를 새로 만들지 말고 질문의 목적에 맞는 kind와 빈 candidates를 다시 판단합니다.",
+      path: ["candidates"],
+    });
   }
   if (contract.kind === "yes_no" && contract.candidates.length !== 2) {
-    context.addIssue({ code: "custom", message: "예/아니오 답변에는 두 후보가 필요합니다.", path: ["candidates"] });
+    context.addIssue({ code: "custom", message: "yes_no의 candidates에는 출력 언어의 예와 아니요 두 값만 필요합니다.", path: ["candidates"] });
   }
 });
 

@@ -55,7 +55,17 @@ const PLAN_GROQ_TIMEOUT_MS = 40_000;
 const INTERPRET_GROQ_TIMEOUT_MS = 50_000;
 const MIN_RETRY_BUDGET_MS = 10_000;
 
-const SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
+const PLAN_SYSTEM_PROMPT = `당신은 타로밀크티 웹의 리딩 계획 엔진이다.
+- 질문에 답하거나 추천·예측·카드 해석을 하지 않고, 질문에 맞는 답변 계약과 카드 자리만 설계한다.
+- 질문의 단어를 따로 떼지 말고 문장 전체와 대화 맥락에서 각 표현의 역할을 판단한다.
+- 어떤 대상이 언급되었다는 이유만으로 선택 후보로 취급하지 않는다.
+- 사용자가 현재 선택하거나 비교할 수 있게 제시한 닫힌 대안 집합만 candidates에 넣는다.
+- 제외·거절한 대상, 필수 조건, 선호, 예시, 과거 선택, 상황 설명은 후보가 아니라 제약 또는 배경이다.
+- 닫힌 후보 집합이 없으면 후보를 만들지 않는다. 중요한 제약은 subject, interpretationFrame, position의 focus에 보존한다.
+- 요청에서 지정한 출력 언어로 짧고 구체적인 문자열을 작성한다.
+- 반드시 JSON 객체만 출력한다.`;
+
+const INTERPRETATION_SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
 - 요청에서 지정한 출력 언어로 중립적이고 분석적인 문장을 쓴다.
 - 인사, 위로, 신비주의적 수사, 감탄, 사람처럼 느끼는 표현을 쓰지 않는다.
 - 질문 전체와 대화 문맥을 읽어 사용자가 실제로 요구한 답의 형태와 범위를 판단한다.
@@ -341,6 +351,9 @@ async function runAiJson<T>(
   const startedAt = Date.now();
   const deadlineAt = startedAt + totalTimeoutMs;
   let lastError: unknown;
+  let lastOutputError: unknown;
+  let validationFailureProvider: AiJsonProvider["activeProvider"] | undefined;
+  let validationFailureCount = 0;
   let deadlineReached = false;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const remainingMs = deadlineAt - Date.now();
@@ -352,11 +365,11 @@ async function runAiJson<T>(
     const attemptStartedAt = Date.now();
     const attemptProvider = provider.activeProvider;
     try {
-      const userPrompt = attempt === 0
+      const userPrompt = lastOutputError === undefined
         ? prompt
-        : `${prompt}\n이전 응답 문제: ${lastError instanceof Error ? lastError.message.replace(/\s+/g, " ").slice(0, 900) : "출력 품질 또는 JSON 형식이 기준에 맞지 않았다."}\n지적된 문제를 모두 고쳐 필수 필드를 포함한 JSON만 다시 출력하라.`;
+        : `${prompt}\n\n이전 출력은 다음 검증을 통과하지 못했다: ${lastOutputError instanceof Error ? lastOutputError.message.replace(/\s+/g, " ").slice(0, 900) : "출력 품질 또는 JSON 형식이 기준에 맞지 않았다."}\n질문의 의미를 다시 판단하고, 지적된 문제를 고친 완전한 JSON 객체를 처음부터 다시 출력하라.`;
       const result = await provider.run({
-        systemPrompt: SYSTEM_PROMPT,
+        systemPrompt: operation === "plan" ? PLAN_SYSTEM_PROMPT : INTERPRETATION_SYSTEM_PROMPT,
         userPrompt,
         maxTokens,
         temperature,
@@ -380,6 +393,16 @@ async function runAiJson<T>(
       return validated;
     } catch (error) {
       lastError = error;
+      const outputFailure = !(error instanceof AiProviderError);
+      if (outputFailure) {
+        lastOutputError = error;
+        if (validationFailureProvider === attemptProvider) {
+          validationFailureCount += 1;
+        } else {
+          validationFailureProvider = attemptProvider;
+          validationFailureCount = 1;
+        }
+      }
       console.warn("[tarot-ai] response rejected", {
         requestId,
         operation,
@@ -397,21 +420,16 @@ async function runAiJson<T>(
         if (recovered) return recovered;
         throw providerApiError(error);
       }
-      const recovered = recoverLastValid?.();
-      if (recovered && attempt >= 1) {
-        console.warn("[tarot-ai] accepting structurally valid response after one correction", {
-          requestId,
-          operation,
-          totalElapsedMs: Date.now() - startedAt,
-        });
-        return recovered;
-      }
       if (deadlineAt - Date.now() < MIN_RETRY_BUDGET_MS) {
         deadlineReached = true;
         break;
       }
-      if (attempt + 1 < maxAttempts) {
-        provider.switchToFallback?.("quality-retry", { requestId, operation });
+      if (outputFailure && validationFailureCount >= 2 && attempt + 1 < maxAttempts) {
+        const switched = provider.switchToFallback?.("quality-retry", { requestId, operation }) ?? false;
+        if (switched) {
+          validationFailureProvider = undefined;
+          validationFailureCount = 0;
+        }
       }
     }
   }
@@ -504,22 +522,42 @@ export async function createAiPlan(
 대화 맥락: ${JSON.stringify(context ?? null)}
 출력 언어: ${language === "ko" ? "한국어" : "English"}. JSON 키는 스키마 그대로 유지하고 모든 사용자 표시 문자열 값은 이 언어로 작성한다.
 
-질문 전체와 대화 문맥을 이해한 뒤 answerContract와 자리 역할을 한 번에 결정한다. 단어 하나가 아니라 사용자가 문장 전체에서 요구한 답을 기준으로 판단한다.
-- choose_one: 사용자가 제시한 후보 중 하나를 골라 달라는 요청. candidates에는 질문의 후보를 철자 그대로 2~5개 넣는다.
-- recommend_one: 정해진 후보 없이 구체적인 대상이나 행동 하나를 추천해 달라는 요청. candidates는 반드시 빈 배열이다. 카드 공개 전에는 내부적으로도 후보 목록을 만들지 않는다. 카드를 모두 해석한 뒤에만 질문의 제약 안에서 구체적인 답 하나를 생성한다.
-- yes_no: 해야 하는지, 가능한지처럼 예/아니요 방향을 요청. 출력 언어의 예/아니요 후보 2개를 넣는다.
-- outcome: 성공·실패, 합격·불합격, 성사 여부처럼 사건의 결과를 묻는 질문. candidates는 빈 배열이다. 자리 수와 역할은 질문의 복잡도에 따라 정한다.
-- compare: 후보의 차이만 비교하고 선택까지 요구하지 않는 질문. 질문에 나온 후보를 candidates에 넣는다.
-- forecast: 시기, 가능성, 향후 흐름을 묻는 질문.
-- advice: 무엇을 하거나 어떻게 대응할지 먼저 할 행동을 묻는 질문.
-- explain: 이유나 원인을 묻는 질문.
-- analysis: 위 유형이 아닌 상태·관계·의미 분석 질문.
-후속 질문이 앞선 결론을 이어 가는지 새 대상을 묻는지도 문맥으로 판단한다. 명시 후보는 현재 질문이나 previousContract에서 사용자가 제시한 것만 사용할 수 있다. recommend_one에는 후보를 만들거나 상속하지 않는다.
-answerContract.subject에는 지금 답해야 할 대상을 짧고 구체적으로 적는다. candidates가 필요 없는 유형은 빈 배열을 쓴다.
+JSON을 쓰기 전에 다음 세 가지를 내부적으로 구분한다. 이 구분 과정은 출력하지 않는다.
+1. 사용자가 최종적으로 원하는 답의 형태와 대상
+2. 사용자가 현재 선택하거나 비교할 수 있게 제시한 닫힌 후보 집합
+3. 최종 답이 지켜야 할 제외·요구·선호 조건과 단순한 배경 정보
+
+candidates에는 2번의 대상만 넣는다. 어떤 대상을 candidates에 넣으려면 모두 충족해야 한다.
+- 사용자가 그 대상을 직접 제시했다.
+- 그 대상이 현재도 선택 가능한 대안이다.
+- 사용자가 그 대안 집합 안에서 선택하거나 비교해 달라고 요청했다.
+
+언급된 명사구를 자동으로 후보로 보지 않는다. 제외하거나 거절한 대상, 반드시 지켜야 할 조건, 선호, 예시, 이미 한 선택, 과거 사건, 상황 설명은 3번이며 candidates에 넣지 않는다. 닫힌 후보 집합이 없으면 AI가 후보를 만들거나 범위를 미리 좁히지 않는다.
+추상적인 대비 예시: "X와 Y 중 골라 달라"는 X와 Y가 후보지만, "X는 제외하고 하나를 추천해 달라"에서 X는 제약이고 후보가 아니다. "전에 X를 했는데 이번에는 하나를 추천해 달라"에서 X는 배경이고 후보가 아니다.
+
+다음 우선순위로 answerContract.kind를 하나 정한다.
+- compare: 닫힌 후보 집합의 차이만 설명해 달라는 요청
+- choose_one: 닫힌 후보 집합 안에서 하나를 선택해 달라는 요청. candidates에는 선택 가능한 후보를 질문의 표현 그대로 2~5개 넣는다.
+- outcome: 사건의 성공·실패, 합격·불합격, 성사 여부처럼 결과를 묻는 요청. candidates는 빈 배열이다.
+- yes_no: 어떤 행동을 할지·피할지 또는 가능한지를 예/아니요로 판단해 달라는 요청. 출력 언어의 예/아니요 후보 2개를 넣는다.
+- recommend_one: 닫힌 후보 집합 없이 구체적인 대상이나 행동 하나를 추천해 달라는 요청. candidates는 반드시 빈 배열이다.
+- explain: 이유나 원인을 묻는 요청
+- advice: 어떻게 대응할지 또는 먼저 할 행동을 묻는 요청
+- forecast: 앞으로의 흐름이나 시기를 묻는 요청
+- analysis: 위 유형이 아닌 상태·관계·의미 분석 요청
+
+후속 질문은 현재 문장과 대화 맥락을 함께 읽고, 앞선 후보나 조건을 실제로 이어 묻는 경우에만 상속한다. 현재 질문이 새 범위를 제시하면 현재 질문을 우선한다. recommend_one에는 앞선 후보를 기계적으로 상속하지 않는다.
+answerContract.subject에는 지금 답해야 할 대상과 반드시 지켜야 할 제약을 짧고 구체적으로 보존한다. candidates가 필요 없는 유형은 빈 배열을 쓴다.
+
+출력 직전에 다음을 스스로 점검하고, 하나라도 맞지 않으면 JSON을 출력하기 전에 조용히 다시 판단한다.
+- candidates의 각 항목이 지금도 선택 가능한 대안이며, 제외 조건이나 배경 정보가 아니다.
+- choose_one과 compare의 candidates는 사용자가 실제로 제시한 닫힌 후보 집합과 정확히 일치한다.
+- recommend_one에서는 candidates가 비어 있고, subject와 자리 focus에 중요한 제약이 빠지지 않았다.
+- answerContract.kind가 사용자가 최종적으로 요구한 답의 형태와 일치한다.
 
 positions는 질문에 실제로 필요한 서로 다른 역할의 수에 따라 1~5개로 정한다. positions 길이가 사용자가 뽑을 카드 수가 된다. 질문 글자 수나 특정 단어가 아니라, 답을 내는 데 필요한 관점 수를 기준으로 한다. 의미가 겹치는 자리를 수를 늘리기 위해 만들지 않는다.
 choose_one, yes_no, compare도 후보 수에 기계적으로 맞추지 말고, 질문을 제대로 판단하는 데 필요한 역할을 1~5개로 구성한다. 후보별 자리가 필요하다면 사용하되 자리 이름에 후보 문구를 억지로 반복하지 않는다.
-recommend_one은 후보별 자리를 만들지 않는다. 질문에 답하기 위해 필요한 서로 다른 역할만 만든다. 구체적인 추천 대상은 카드 공개 뒤 해석 단계에서 처음 정한다.
+recommend_one은 후보별 자리를 만들지 않는다. 질문에 답하기 위해 필요한 서로 다른 역할만 만든다. 제약 하나마다 자리를 기계적으로 만들지 말고, 각 focus가 제약을 지키는 답을 판단하는 데 어떻게 기여하는지 작성한다. 구체적인 추천 대상은 카드 공개 뒤 해석 단계에서 처음 정한다.
 각 title은 화면에서 바로 이해되는 짧은 라벨이고, focus는 그 카드가 최종 답에 어떤 정보를 더할지 구체적으로 설명한다. 어느 질문에나 그대로 붙는 추상적인 자리나 설문 문항 같은 표현을 피한다.
 응답 JSON 스키마:
 {

@@ -1,10 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createAiInterpretation,
   createAiPlan,
 } from "@/app/api/tarot/route";
 import type { AnswerContract } from "@/src/lib/tarot";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function aiPlan(cardCount: number) {
   return {
@@ -24,6 +28,121 @@ function aiPlan(cardCount: number) {
 }
 
 describe("AI-owned planning", () => {
+  it.each([
+    ["아침 머먹을까.. 죽은 안먹고싶어..", "죽을 제외한 아침 메뉴 하나"],
+    ["주말에 어디 갈까? 실내는 피하고 싶어", "실내를 제외한 주말 장소 하나"],
+    ["선물 하나 추천해줘. 향수는 이미 줬어", "이미 준 향수를 제외한 선물 하나"],
+    ["새 취미 뭐가 좋을까? 운동은 하고 싶지 않아", "운동이 아닌 새 취미 하나"],
+  ])("keeps an open recommendation open when a mentioned item is a constraint: %s", async (question, subject) => {
+    const payload = aiPlan(2);
+    payload.answerContract = {
+      kind: "recommend_one",
+      subject,
+      candidates: [],
+    };
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify(payload) }));
+
+    const plan = await createAiPlan(
+      { run: workersRun },
+      question,
+      false,
+      "ko",
+    );
+
+    expect(plan.answerContract).toEqual({ kind: "recommend_one", subject, candidates: [] });
+  });
+
+  it("gives the planner domain-neutral rules for candidates, constraints, and background", async () => {
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify(aiPlan(2)) }));
+    await createAiPlan(
+      { run: workersRun },
+      "조건을 지키면서 새로운 활동 하나를 추천해줘",
+      false,
+      "ko",
+    );
+
+    const request = workersRun.mock.calls[0][1] as { messages: Array<{ content: string }> };
+    expect(request.messages[0].content).toContain("리딩 계획 엔진");
+    expect(request.messages[0].content).toContain("언급되었다는 이유만으로 선택 후보로 취급하지 않는다");
+    expect(request.messages[0].content).not.toContain("카드 원뜻");
+    expect(request.messages[1].content).toContain("닫힌 후보 집합");
+    expect(request.messages[1].content).toContain("제외하거나 거절한 대상");
+    expect(request.messages[1].content).toContain("과거 사건");
+    expect(request.messages[1].content).toContain("X는 제외하고 하나를 추천해 달라");
+  });
+
+  it("returns a semantic validation failure to the same planner before using Groq", async () => {
+    const invalid = aiPlan(2);
+    invalid.answerContract = {
+      kind: "choose_one",
+      subject: "새 활동 하나",
+      candidates: ["이미 제외한 활동"],
+    };
+    const corrected = aiPlan(2);
+    corrected.answerContract = {
+      kind: "recommend_one",
+      subject: "제외 조건을 지킨 새 활동 하나",
+      candidates: [],
+    };
+    const workersRun = vi.fn()
+      .mockResolvedValueOnce({ response: JSON.stringify(invalid) })
+      .mockResolvedValueOnce({ response: JSON.stringify(corrected) });
+    const groqFetch = vi.fn(async () => {
+      throw new Error("Groq should not be called when Workers corrects its own output");
+    });
+    vi.stubGlobal("fetch", groqFetch);
+
+    const plan = await createAiPlan(
+      { run: workersRun },
+      "새 활동 하나를 추천해줘. 전에 하던 것은 제외하고 싶어.",
+      false,
+      "ko",
+      undefined,
+      "test-groq-key",
+    );
+
+    expect(plan.answerContract.kind).toBe("recommend_one");
+    expect(workersRun).toHaveBeenCalledTimes(2);
+    expect(groqFetch).not.toHaveBeenCalled();
+    const retry = workersRun.mock.calls[1][1] as { messages: Array<{ content: string }> };
+    expect(retry.messages[1].content).toContain("이전 출력은 다음 검증을 통과하지 못했다");
+    expect(retry.messages[1].content).toContain("후보를 새로 만들지 말고");
+    expect(retry.messages[1].content).toContain("질문의 의미를 다시 판단");
+  });
+
+  it("uses Groq only after the same planner rejects two corrected outputs", async () => {
+    const invalid = aiPlan(2);
+    invalid.answerContract = {
+      kind: "choose_one",
+      subject: "열린 추천",
+      candidates: ["AI가 만든 후보"],
+    };
+    const corrected = aiPlan(2);
+    corrected.answerContract = {
+      kind: "recommend_one",
+      subject: "조건을 지킨 추천 하나",
+      candidates: [],
+    };
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify(invalid) }));
+    const groqFetch = vi.fn(async () => Response.json({
+      choices: [{ message: { content: JSON.stringify(corrected) } }],
+    }));
+    vi.stubGlobal("fetch", groqFetch);
+
+    const plan = await createAiPlan(
+      { run: workersRun },
+      "정해진 후보 없이 조건에 맞는 것 하나를 추천해줘",
+      false,
+      "ko",
+      undefined,
+      "test-groq-key",
+    );
+
+    expect(plan.answerContract.kind).toBe("recommend_one");
+    expect(workersRun).toHaveBeenCalledTimes(2);
+    expect(groqFetch).toHaveBeenCalledTimes(1);
+  });
+
   it("derives four cards from the AI-selected roles for a short question", async () => {
     const workersRun = vi.fn(async () => ({ response: JSON.stringify(aiPlan(4)) }));
     const plan = await createAiPlan(
