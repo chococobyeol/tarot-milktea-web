@@ -94,6 +94,55 @@ describe("AI-owned planning", () => {
     expect(plan.positions.map((position) => position.title)).toEqual(["성공 신호", "실패 신호"]);
     expect(workersRun).toHaveBeenCalledTimes(1);
   });
+
+  it("records retry and success timing without logging the question or generated prompt", async () => {
+    const privateQuestion = "로그에 남으면 안 되는 비공개 질문 7f4d";
+    const workersRun = vi.fn()
+      .mockResolvedValueOnce({ response: "not-json" })
+      .mockResolvedValueOnce({ response: JSON.stringify(aiPlan(2)) });
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await expect(createAiPlan(
+        { run: workersRun },
+        privateQuestion,
+        false,
+        "ko",
+      )).resolves.toMatchObject({ cardCount: 2 });
+
+      const logCalls = [...warn.mock.calls, ...info.mock.calls, ...error.mock.calls];
+      const serializedLogs = JSON.stringify(logCalls);
+      expect(serializedLogs).not.toContain(privateQuestion);
+      expect(serializedLogs).not.toContain("현재 질문:");
+      expect(serializedLogs).not.toContain("systemPrompt");
+      expect(serializedLogs).not.toContain("userPrompt");
+
+      expect(warn).toHaveBeenCalledWith(
+        "[tarot-ai] response rejected",
+        expect.objectContaining({
+          operation: "plan",
+          attempt: 1,
+          attemptElapsedMs: expect.any(Number),
+          totalElapsedMs: expect.any(Number),
+        }),
+      );
+      expect(info).toHaveBeenCalledWith(
+        "[tarot-ai] response accepted",
+        expect.objectContaining({
+          operation: "plan",
+          attempt: 2,
+          attemptElapsedMs: expect.any(Number),
+          totalElapsedMs: expect.any(Number),
+        }),
+      );
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
 });
 
 describe("generic interpretation", () => {
@@ -148,5 +197,51 @@ describe("generic interpretation", () => {
     expect(result.verdict?.statement).toBe("새 캐릭터 이름은 루미가 좋아요.");
     expect(result.verdict?.kind).toBe("recommend_one");
     expect(workersRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps waiting past 60 seconds but ends at the reserved AI deadline before the client deadline", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const neverResponds = vi.fn(() => new Promise<unknown>(() => undefined));
+      const result = createAiInterpretation(
+        { run: neverResponds },
+        "오래 걸리는 해석도 기다려 주세요",
+        [{
+          cardId: "major-17",
+          reversed: false,
+          positionId: "main-signal",
+          positionTitle: "핵심 신호",
+          positionFocus: "질문의 핵심 방향",
+          round: 0,
+        }],
+        undefined,
+        "ko",
+        { kind: "analysis", subject: "질문의 핵심", candidates: [] },
+      );
+      let settled = false;
+      void result.then(
+        () => { settled = true; },
+        () => { settled = true; },
+      );
+      const rejection = expect(result).rejects.toMatchObject({
+        status: 504,
+        code: "AI_RESPONSE_TIMEOUT",
+      });
+
+      await vi.advanceTimersByTimeAsync(60_001);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(104_998);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await rejection;
+      expect(settled).toBe(true);
+      expect(neverResponds).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

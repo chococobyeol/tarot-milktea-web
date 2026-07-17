@@ -65,6 +65,114 @@ describe("quota fallback AI provider", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("bounds a hanging Workers AI call with its configured timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const workersRun = vi.fn(() => new Promise<unknown>(() => undefined));
+      const provider = createQuotaFallbackAiProvider({
+        workersAi: workersBinding(workersRun),
+        workersModel: "workers-model",
+        groqModel: "openai/gpt-oss-120b",
+        workersTimeoutMs: 1_250,
+      });
+
+      const rejection = expect(provider.run(request)).rejects.toMatchObject({
+        provider: "workers-ai",
+        kind: "timeout",
+        retryable: false,
+      });
+      await vi.advanceTimersByTimeAsync(1_249);
+      expect(workersRun).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets a sole Workers AI call use the shared deadline without overlapping retries", async () => {
+    vi.useFakeTimers();
+    try {
+      const workersRun = vi.fn(() => new Promise<unknown>(() => undefined));
+      const provider = createQuotaFallbackAiProvider({
+        workersAi: workersBinding(workersRun),
+        workersModel: "workers-model",
+        groqModel: "openai/gpt-oss-120b",
+        workersTimeoutMs: 1_000,
+      });
+
+      let settled = false;
+      const result = provider.run({ ...request, deadlineAt: Date.now() + 2_500 });
+      void result.then(
+        () => { settled = true; },
+        () => { settled = true; },
+      );
+      const rejection = expect(result).rejects.toMatchObject({
+        provider: "workers-ai",
+        kind: "timeout",
+        retryable: false,
+      });
+
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(settled).toBe(false);
+      expect(workersRun).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_499);
+      await rejection;
+      expect(settled).toBe(true);
+      expect(workersRun).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the Groq per-call timeout explicit and aborts its fetch", async () => {
+    vi.useFakeTimers();
+    try {
+      let groqSignal: AbortSignal | null = null;
+      const fetcher = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+        groqSignal = init?.signal as AbortSignal;
+        return new Promise<Response>((_resolve, reject) => {
+          groqSignal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          }, { once: true });
+        });
+      }) as unknown as typeof fetch;
+      const provider = createQuotaFallbackAiProvider({
+        workersAi: workersBinding(async () => {
+          throw new Error("4006: daily free allocation exhausted");
+        }),
+        workersModel: "workers-model",
+        groqApiKey: "test-key",
+        groqModel: "openai/gpt-oss-120b",
+        timeoutMs: 2_750,
+        fetcher,
+      });
+
+      await expect(provider.run(request)).rejects.toMatchObject({
+        provider: "workers-ai",
+        kind: "daily_limit",
+        retryable: true,
+      });
+      let timeoutError: unknown;
+      const groqCall = provider.run(request).catch((error: unknown) => {
+        timeoutError = error;
+      });
+      await vi.advanceTimersByTimeAsync(2_749);
+      expect(groqSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await groqCall;
+      expect(timeoutError).toMatchObject({
+        provider: "groq",
+        kind: "timeout",
+        retryable: true,
+      });
+      expect(groqSignal?.aborted).toBe(true);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("switches once on the exact quota error and keeps retries on Groq", async () => {
     const workersRun = vi.fn(async () => {
       throw new Error("4006: used up daily free allocation of 10,000 neurons");
@@ -81,8 +189,13 @@ describe("quota fallback AI provider", () => {
       onFallback,
     });
 
-    await provider.run(request);
+    await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "daily_limit",
+      retryable: true,
+    });
     await provider.run({ ...request, userPrompt: "corrected" });
+    await provider.run({ ...request, userPrompt: "corrected-again" });
 
     expect(provider.activeProvider).toBe("groq");
     expect(workersRun).toHaveBeenCalledTimes(1);
@@ -124,6 +237,11 @@ describe("quota fallback AI provider", () => {
       fetcher,
     });
 
+    await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "daily_limit",
+      retryable: true,
+    });
     await provider.run(request);
     await provider.run(request);
 
@@ -161,6 +279,11 @@ describe("quota fallback AI provider", () => {
     });
 
     await provider.run(request);
+    await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "daily_limit",
+      retryable: true,
+    });
     await provider.run(request);
 
     const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
@@ -178,6 +301,11 @@ describe("quota fallback AI provider", () => {
       fetcher,
     });
 
+    await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "unavailable",
+      retryable: true,
+    });
     await expect(provider.run(request)).resolves.toEqual(expect.any(Object));
     expect(provider.activeProvider).toBe("groq");
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -219,6 +347,11 @@ describe("quota fallback AI provider", () => {
       fetcher,
     });
 
+    await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "daily_limit",
+      retryable: true,
+    });
     await provider.run(request);
 
     const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
@@ -260,6 +393,11 @@ describe("quota fallback AI provider", () => {
     });
 
     await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "daily_limit",
+      retryable: true,
+    });
+    await expect(provider.run(request)).rejects.toMatchObject({
       provider: "groq",
       kind: "rate_limit",
       retryable: false,
@@ -292,6 +430,11 @@ describe("quota fallback AI provider", () => {
       fetcher,
     });
 
+    await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "daily_limit",
+      retryable: true,
+    });
     const error = await provider.run(request).catch((caught: unknown) => caught);
     expect(error).toMatchObject({
       provider: "groq",
@@ -327,6 +470,11 @@ describe("quota fallback AI provider", () => {
       fetcher,
     });
 
+    await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "daily_limit",
+      retryable: true,
+    });
     const error = await provider.run(request).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(AiProviderError);
     expect(error).toMatchObject({ provider: "groq", kind, retryable });

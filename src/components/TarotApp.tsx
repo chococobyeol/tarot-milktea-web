@@ -74,6 +74,7 @@ type Phase =
   | "revealing"
   | "result";
 type ResultView = "summary" | "cards" | "analysis";
+type AiWaitStage = 0 | 1 | 2;
 
 interface RestorableState {
   phase: Phase;
@@ -225,6 +226,26 @@ function userError(error: unknown, language: AppLanguage = "ko"): string {
     }
     if (error.code === "SESSION_EXPIRED" || error.status === 401) {
       return english ? "The session expired. Complete the bot check and retry." : "세션이 만료되었습니다. 봇 감지 확인 후 다시 시도하세요.";
+    }
+    if (error.code === "SESSION_TIMEOUT") {
+      return english
+        ? "Session verification took too long. Complete the bot check and try again."
+        : "세션 확인 시간이 초과되었습니다. 봇 감지 확인 후 다시 시도하세요.";
+    }
+    if (error.code === "PLAN_TIMEOUT") {
+      return english
+        ? "The card layout took too long to complete. Your question is still here, so you can try again."
+        : "카드 구성을 완료하는 데 시간이 너무 오래 걸렸습니다. 질문은 그대로 유지되어 있으니 다시 시도하세요.";
+    }
+    if (error.code === "INTERPRETATION_TIMEOUT") {
+      return english
+        ? "The interpretation took too long to complete. Your selected cards are still here, so you can try again."
+        : "카드 해석을 완료하는 데 시간이 너무 오래 걸렸습니다. 선택한 카드는 그대로 유지되어 있으니 다시 시도하세요.";
+    }
+    if (error.code === "AI_RESPONSE_TIMEOUT") {
+      return english
+        ? "The AI response took too long. Your current progress is still here, so you can try again."
+        : "AI 응답 생성 시간이 너무 오래 걸렸습니다. 현재 진행 상태는 그대로 유지되어 있으니 다시 시도하세요.";
     }
     return error.message;
   }
@@ -448,6 +469,64 @@ function holdStage(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function aiLoadingCopy(
+  phase: "planning" | "interpreting",
+  stage: AiWaitStage,
+  language: AppLanguage,
+  round: number,
+): { title: string; description: string } {
+  const t = UI_TEXT[language];
+  if (stage === 0) {
+    return phase === "planning"
+      ? { title: round === 0 ? t.planningInitial : t.planningFollowup, description: t.wait }
+      : { title: t.interpreting, description: t.interpretingDescription };
+  }
+
+  if (language === "ko") {
+    if (phase === "planning") {
+      return stage === 1
+        ? {
+          title: "AI가 카드 구성을 생성하고 있습니다.",
+          description: "응답 생성이 계속되고 있습니다. 화면을 유지하고 조금 더 기다리세요.",
+        }
+        : {
+          title: "AI가 카드 구성을 계속 생성하고 있습니다.",
+          description: "평소보다 오래 걸리고 있지만 요청은 진행 중입니다. 같은 요청을 다시 보내지 마세요.",
+        };
+    }
+    return stage === 1
+      ? {
+        title: "AI가 카드 해석을 생성하고 있습니다.",
+        description: "응답 생성이 계속되고 있습니다. 화면을 유지하고 조금 더 기다리세요.",
+      }
+      : {
+        title: "AI가 카드 해석을 계속 생성하고 있습니다.",
+        description: "평소보다 오래 걸리고 있지만 요청은 진행 중입니다. 같은 요청을 다시 보내지 마세요.",
+      };
+  }
+
+  if (phase === "planning") {
+    return stage === 1
+      ? {
+        title: "AI is still generating the card layout.",
+        description: "The request is still running. Keep this screen open and wait a little longer.",
+      }
+      : {
+        title: "AI is continuing to generate the card layout.",
+        description: "This is taking longer than usual, but the request is still running. Do not submit it again.",
+      };
+  }
+  return stage === 1
+    ? {
+      title: "AI is still generating the interpretation.",
+      description: "The request is still running. Keep this screen open and wait a little longer.",
+    }
+    : {
+      title: "AI is continuing to generate the interpretation.",
+      description: "This is taking longer than usual, but the request is still running. Do not submit it again.",
+    };
+}
+
 function fitTextarea(element: HTMLTextAreaElement | null): void {
   if (!element) return;
   element.style.height = "auto";
@@ -492,6 +571,7 @@ export function TarotApp() {
   const [followupOpen, setFollowupOpen] = useState(false);
   const [resultView, setResultView] = useState<ResultView>("summary");
   const [activeCardIndex, setActiveCardIndex] = useState(0);
+  const [aiWaitStage, setAiWaitStage] = useState<AiWaitStage>(0);
   const [restored, setRestored] = useState(false);
   const resultRef = useRef<HTMLElement>(null);
   const exportRef = useRef<HTMLElement>(null);
@@ -530,6 +610,8 @@ export function TarotApp() {
   }, [cards, result]);
   const activeResultCard = resultCards[activeCardIndex] ?? resultCards[0];
   const currentProgress = progressFor(phase);
+  const planningCopy = aiLoadingCopy("planning", aiWaitStage, language, round);
+  const interpretationCopy = aiLoadingCopy("interpreting", aiWaitStage, language, round);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -627,6 +709,16 @@ export function TarotApp() {
   }, [phase]);
 
   useEffect(() => {
+    if (phase !== "planning" && phase !== "interpreting") return;
+    const longWaitTimer = window.setTimeout(() => setAiWaitStage(1), 30_000);
+    const extendedWaitTimer = window.setTimeout(() => setAiWaitStage(2), 90_000);
+    return () => {
+      window.clearTimeout(longWaitTimer);
+      window.clearTimeout(extendedWaitTimer);
+    };
+  }, [phase]);
+
+  useEffect(() => {
     if (!historyOpen && !settingsOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setHistoryOpen(false);
@@ -718,6 +810,7 @@ export function TarotApp() {
     }
     setError("");
     setNotice(null);
+    setAiWaitStage(0);
     setPhase("planning");
     const minimumPlanningTime = holdStage(650);
     try {
@@ -814,6 +907,7 @@ export function TarotApp() {
     const context = readingContext();
 
     setError("");
+    setAiWaitStage(0);
     setPhase("interpreting");
     const minimumInterpretationTime = holdStage(800);
     try {
@@ -883,6 +977,7 @@ export function TarotApp() {
     }
     if (followups.length >= 2) return;
     setError("");
+    setAiWaitStage(0);
     setPhase("planning");
     setFollowupOpen(false);
     const minimumPlanningTime = holdStage(650);
@@ -1180,8 +1275,8 @@ export function TarotApp() {
             <div className="scene-center loading-center">
               <div className="loading-deck"><CardBack /><LoaderCircle size={34} /></div>
             </div>
-            <GameDialog title={round === 0 ? t.planningInitial : t.planningFollowup}>
-              <p>{t.wait}</p>
+            <GameDialog title={planningCopy.title}>
+              <p aria-live="polite">{planningCopy.description}</p>
             </GameDialog>
           </section>
         ) : null}
@@ -1330,8 +1425,8 @@ export function TarotApp() {
               ))}
               <LoaderCircle className="analysis-spinner" size={36} />
             </div>
-            <GameDialog title={t.interpreting}>
-              <p>{t.interpretingDescription}</p>
+            <GameDialog title={interpretationCopy.title}>
+              <p aria-live="polite">{interpretationCopy.description}</p>
             </GameDialog>
           </section>
         ) : null}

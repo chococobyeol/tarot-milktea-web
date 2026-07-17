@@ -24,12 +24,20 @@ export interface AiJsonRequest {
   maxTokens: number;
   temperature: number;
   jsonSchema: AiJsonSchema;
+  deadlineAt?: number;
+  requestId?: string;
+  operation?: "plan" | "interpret";
+}
+
+interface AiRequestContext {
+  requestId?: string;
+  operation?: "plan" | "interpret";
 }
 
 export interface AiJsonProvider {
   readonly activeProvider: AiProviderName;
   run(request: AiJsonRequest): Promise<unknown>;
-  switchToFallback?(reason: AiFallbackReason): boolean;
+  switchToFallback?(reason: AiFallbackReason, context?: AiRequestContext): boolean;
 }
 
 export type AiFallbackReason = "daily-limit" | "workers-error" | "quality-retry";
@@ -56,9 +64,42 @@ interface QuotaFallbackProviderOptions {
   groqCorrectionModel?: string;
   groqCorrectionMaxTokens?: number;
   groqCorrectionStrictJsonSchema?: boolean;
+  workersTimeoutMs?: number;
   fetcher?: typeof fetch;
   timeoutMs?: number;
-  onFallback?: (reason: AiFallbackReason) => void;
+  onFallback?: (reason: AiFallbackReason, context?: AiRequestContext) => void;
+}
+
+function requestContext(request: AiJsonRequest): AiRequestContext | undefined {
+  if (!request.requestId && !request.operation) return undefined;
+  return { requestId: request.requestId, operation: request.operation };
+}
+
+function remainingTimeoutMs(request: AiJsonRequest, configuredTimeoutMs: number): number {
+  if (request.deadlineAt === undefined) return configuredTimeoutMs;
+  return Math.min(configuredTimeoutMs, Math.max(0, request.deadlineAt - Date.now()));
+}
+
+async function withProviderTimeout<T>(
+  provider: AiProviderName,
+  timeoutMs: number,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (timeoutMs <= 0) throw new AiProviderError(provider, "timeout", true);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new AiProviderError(provider, "timeout", true)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 function errorDetails(error: unknown, seen = new Set<object>(), depth = 0): string {
@@ -196,15 +237,17 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
   const groqApiKey = options.groqApiKey?.trim() || undefined;
   const fetcher = options.fetcher ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_GROQ_TIMEOUT_MS;
+  const workersTimeoutMs = options.workersTimeoutMs ?? timeoutMs;
   const strictJsonSchema = options.groqStrictJsonSchema ?? true;
   let activeProvider: AiProviderName = "workers-ai";
   let groqCallCount = 0;
 
-  const switchToGroq = (reason: AiFallbackReason): boolean => {
+  const switchToGroq = (reason: AiFallbackReason, context?: AiRequestContext): boolean => {
     if (!groqApiKey || activeProvider === "groq") return false;
     activeProvider = "groq";
     groqCallCount = 0;
-    options.onFallback?.(reason);
+    if (context) options.onFallback?.(reason, context);
+    else options.onFallback?.(reason);
     return true;
   };
 
@@ -217,13 +260,17 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
     const useStrictJsonSchema = useCorrectionModel
       ? options.groqCorrectionStrictJsonSchema ?? false
       : strictJsonSchema;
+    const requestTimeoutMs = remainingTimeoutMs(request, timeoutMs);
+    if (requestTimeoutMs <= 0) {
+      throw new AiProviderError("groq", "timeout", true);
+    }
     groqCallCount += 1;
     return runGroqJson(
       groqApiKey as string,
       model,
       { ...request, maxTokens: Math.min(request.maxTokens, maxTokens) },
       fetcher,
-      timeoutMs,
+      requestTimeoutMs,
       useStrictJsonSchema,
     );
   };
@@ -232,8 +279,8 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
     get activeProvider() {
       return activeProvider;
     },
-    switchToFallback(reason) {
-      return switchToGroq(reason);
+    switchToFallback(reason, context) {
+      return switchToGroq(reason, context);
     },
     async run(request) {
       if (activeProvider === "groq") {
@@ -241,28 +288,40 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
       }
 
       try {
-        return await options.workersAi.run(options.workersModel, {
-          messages: [
-            { role: "system", content: request.systemPrompt },
-            { role: "user", content: request.userPrompt },
-          ],
-          max_tokens: request.maxTokens,
-          temperature: request.temperature,
-          response_format: { type: "json_object" },
-          chat_template_kwargs: { enable_thinking: false },
-        });
+        const requestTimeoutMs = !groqApiKey && request.deadlineAt !== undefined
+          ? Math.max(0, request.deadlineAt - Date.now())
+          : remainingTimeoutMs(request, workersTimeoutMs);
+        return await withProviderTimeout(
+          "workers-ai",
+          requestTimeoutMs,
+          () => options.workersAi.run(options.workersModel, {
+            messages: [
+              { role: "system", content: request.systemPrompt },
+              { role: "user", content: request.userPrompt },
+            ],
+            max_tokens: request.maxTokens,
+            temperature: request.temperature,
+            response_format: { type: "json_object" },
+            chat_template_kwargs: { enable_thinking: false },
+          }),
+        );
       } catch (error) {
         const dailyLimit = isWorkersAiDailyLimitError(error);
+        const providerError = error instanceof AiProviderError ? error : undefined;
+        const kind = dailyLimit ? "daily_limit" : providerError?.kind ?? "unavailable";
         if (!groqApiKey) {
           throw new AiProviderError(
             "workers-ai",
-            dailyLimit ? "daily_limit" : "unavailable",
-            !dailyLimit,
+            kind,
+            !dailyLimit && kind !== "timeout",
           );
         }
 
-        switchToGroq(dailyLimit ? "daily-limit" : "workers-error");
-        return runConfiguredGroq(request);
+        switchToGroq(
+          dailyLimit ? "daily-limit" : "workers-error",
+          requestContext(request),
+        );
+        throw new AiProviderError("workers-ai", kind, true);
       }
     },
   };

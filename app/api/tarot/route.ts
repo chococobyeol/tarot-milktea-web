@@ -44,6 +44,16 @@ const GROQ_PLAN_MODEL = "openai/gpt-oss-120b";
 const GROQ_INTERPRETATION_MODEL = "openai/gpt-oss-120b";
 const GROQ_INTERPRETATION_CORRECTION_MODEL = GROQ_INTERPRETATION_MODEL;
 const GROQ_INTERPRETATION_MAX_TOKENS = 4_800;
+const PLAN_SERVER_TIMEOUT_MS = 110_000;
+const INTERPRET_SERVER_TIMEOUT_MS = 170_000;
+const RESPONSE_FINALIZATION_BUFFER_MS = 5_000;
+const PLAN_AI_TIMEOUT_MS = PLAN_SERVER_TIMEOUT_MS - RESPONSE_FINALIZATION_BUFFER_MS;
+const INTERPRET_AI_TIMEOUT_MS = INTERPRET_SERVER_TIMEOUT_MS - RESPONSE_FINALIZATION_BUFFER_MS;
+const PLAN_WORKERS_TIMEOUT_MS = 30_000;
+const INTERPRET_WORKERS_TIMEOUT_MS = 60_000;
+const PLAN_GROQ_TIMEOUT_MS = 40_000;
+const INTERPRET_GROQ_TIMEOUT_MS = 50_000;
+const MIN_RETRY_BUDGET_MS = 10_000;
 
 const SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
 - 요청에서 지정한 출력 언어로 중립적이고 분석적인 문장을 쓴다.
@@ -239,6 +249,28 @@ function validationDiagnostics(error: unknown): { validationCodes?: string[] } {
   return validationCodes.length > 0 ? { validationCodes } : {};
 }
 
+function requestCorrelationId(request: Request): string {
+  const supplied = request.headers.get("x-tarot-request-id")?.trim().toLowerCase();
+  if (supplied && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(supplied)) {
+    return supplied;
+  }
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `ai-${Date.now()}`;
+}
+
+function remainingAiTimeoutMs(requestStartedAt: number, requestTimeoutMs: number): number {
+  const remaining = requestTimeoutMs - RESPONSE_FINALIZATION_BUFFER_MS - (Date.now() - requestStartedAt);
+  if (remaining < MIN_RETRY_BUDGET_MS) {
+    throw new ApiError(
+      504,
+      "AI_RESPONSE_TIMEOUT",
+      "AI 응답 생성 시간이 너무 길어 요청을 중단했습니다. 현재 상태에서 다시 시도하세요.",
+    );
+  }
+  return remaining;
+}
+
 function classifyAiFailure(error: unknown): string {
   if (error instanceof AiProviderError) {
     return `${error.provider.toUpperCase().replace("-", "_")}_${error.kind.toUpperCase()}`;
@@ -268,6 +300,13 @@ function providerApiError(error: AiProviderError): ApiError {
       error.retryAfter,
     );
   }
+  if (error.kind === "timeout") {
+    return new ApiError(
+      504,
+      "AI_RESPONSE_TIMEOUT",
+      "AI 응답 생성 시간이 너무 길어 요청을 중단했습니다. 현재 상태에서 다시 시도하세요.",
+    );
+  }
   if (error.provider === "groq" && error.kind === "invalid_response") {
     return new ApiError(
       502,
@@ -293,13 +332,25 @@ async function runAiJson<T>(
   maxAttempts = 2,
   temperature = 0.25,
   recoverLastValid?: () => T | undefined,
+  totalTimeoutMs = PLAN_SERVER_TIMEOUT_MS,
+  externalRequestId?: string,
 ): Promise<T> {
-  const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+  const requestId = externalRequestId ?? (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
-    : `ai-${Date.now()}`;
+    : `ai-${Date.now()}`);
+  const startedAt = Date.now();
+  const deadlineAt = startedAt + totalTimeoutMs;
   let lastError: unknown;
+  let deadlineReached = false;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs < MIN_RETRY_BUDGET_MS) {
+      deadlineReached = true;
+      break;
+    }
     let responseLength: number | undefined;
+    const attemptStartedAt = Date.now();
+    const attemptProvider = provider.activeProvider;
     try {
       const userPrompt = attempt === 0
         ? prompt
@@ -310,10 +361,23 @@ async function runAiJson<T>(
         maxTokens,
         temperature,
         jsonSchema,
+        deadlineAt,
+        requestId,
+        operation,
       });
       const responseText = extractResponseText(result);
       responseLength = responseText.length;
-      return validate(parseJsonText(responseText));
+      const validated = validate(parseJsonText(responseText));
+      console.info("[tarot-ai] response accepted", {
+        requestId,
+        operation,
+        attempt: attempt + 1,
+        provider: provider.activeProvider,
+        attemptElapsedMs: Date.now() - attemptStartedAt,
+        totalElapsedMs: Date.now() - startedAt,
+        responseLength,
+      });
+      return validated;
     } catch (error) {
       lastError = error;
       console.warn("[tarot-ai] response rejected", {
@@ -322,6 +386,9 @@ async function runAiJson<T>(
         attempt: attempt + 1,
         provider: provider.activeProvider,
         category: classifyAiFailure(error),
+        attemptStartedWith: attemptProvider,
+        attemptElapsedMs: Date.now() - attemptStartedAt,
+        totalElapsedMs: Date.now() - startedAt,
         responseLength,
         ...validationDiagnostics(error),
       });
@@ -330,7 +397,22 @@ async function runAiJson<T>(
         if (recovered) return recovered;
         throw providerApiError(error);
       }
-      if (attempt + 1 < maxAttempts) provider.switchToFallback?.("quality-retry");
+      const recovered = recoverLastValid?.();
+      if (recovered && attempt >= 1) {
+        console.warn("[tarot-ai] accepting structurally valid response after one correction", {
+          requestId,
+          operation,
+          totalElapsedMs: Date.now() - startedAt,
+        });
+        return recovered;
+      }
+      if (deadlineAt - Date.now() < MIN_RETRY_BUDGET_MS) {
+        deadlineReached = true;
+        break;
+      }
+      if (attempt + 1 < maxAttempts) {
+        provider.switchToFallback?.("quality-retry", { requestId, operation });
+      }
     }
   }
 
@@ -339,8 +421,23 @@ async function runAiJson<T>(
     console.warn("[tarot-ai] accepting structurally valid response after quality retries", {
       requestId,
       operation,
+      totalElapsedMs: Date.now() - startedAt,
     });
     return recovered;
+  }
+  if (deadlineReached || Date.now() >= deadlineAt) {
+    console.error("[tarot-ai] response deadline reached", {
+      requestId,
+      operation,
+      provider: provider.activeProvider,
+      totalElapsedMs: Date.now() - startedAt,
+      category: classifyAiFailure(lastError),
+    });
+    throw new ApiError(
+      504,
+      "AI_RESPONSE_TIMEOUT",
+      "AI 응답 생성 시간이 너무 길어 요청을 중단했습니다. 현재 상태에서 다시 시도하세요.",
+    );
   }
   if (lastError instanceof AiProviderError) throw providerApiError(lastError);
   console.error("[tarot-ai] all responses rejected", {
@@ -348,6 +445,7 @@ async function runAiJson<T>(
     operation,
     provider: provider.activeProvider,
     category: classifyAiFailure(lastError),
+    totalElapsedMs: Date.now() - startedAt,
     ...validationDiagnostics(lastError),
   });
   throw new ApiError(502, "INVALID_AI_RESPONSE", "AI 응답 형식을 확인하지 못했습니다. 현재 상태를 유지하고 다시 시도하세요.");
@@ -362,6 +460,10 @@ function createReadingAiProvider(
   groqCorrectionModel?: string,
   groqCorrectionMaxTokens?: number,
   groqCorrectionStrictJsonSchema?: boolean,
+  timing: { workersTimeoutMs: number; groqTimeoutMs: number } = {
+    workersTimeoutMs: PLAN_WORKERS_TIMEOUT_MS,
+    groqTimeoutMs: PLAN_GROQ_TIMEOUT_MS,
+  },
 ): AiJsonProvider {
   return createQuotaFallbackAiProvider({
     workersAi: ai,
@@ -373,8 +475,12 @@ function createReadingAiProvider(
     groqCorrectionModel,
     groqCorrectionMaxTokens,
     groqCorrectionStrictJsonSchema,
-    onFallback: (reason) => {
+    workersTimeoutMs: timing.workersTimeoutMs,
+    timeoutMs: timing.groqTimeoutMs,
+    onFallback: (reason, context) => {
       console.warn("[tarot-ai] switching provider", {
+        requestId: context?.requestId,
+        operation: context?.operation,
         from: "workers-ai",
         to: "groq",
         reason,
@@ -390,6 +496,8 @@ export async function createAiPlan(
   language: ReadingLanguage,
   context?: ReadingContext,
   groqApiKey?: string,
+  requestId?: string,
+  totalTimeoutMs = PLAN_AI_TIMEOUT_MS,
 ): Promise<ReadingPlan> {
   const prompt = `다음 질문을 위한 ${followup ? "추가" : "최초"} 타로 리딩 구조를 설계하라.
 현재 질문: ${JSON.stringify(question)}
@@ -430,11 +538,15 @@ interpretationFrame은 자리 이름을 다시 나열하지 말고, 이번 리�
     GROQ_PLAN_MODEL,
     1_600,
     true,
+    {
+      workersTimeoutMs: PLAN_WORKERS_TIMEOUT_MS,
+      groqTimeoutMs: PLAN_GROQ_TIMEOUT_MS,
+    },
   );
   return runAiJson("plan", provider, prompt, (value) => enforcePlanQuality(
     readingPlanSchema.parse(normalizePlanShape(value)),
     { question, language, conversation: context },
-  ), 1_200, READING_PLAN_JSON_SCHEMA, 3, 0.2);
+  ), 1_200, READING_PLAN_JSON_SCHEMA, 3, 0.2, undefined, totalTimeoutMs, requestId);
 }
 
 export async function createAiInterpretation(
@@ -446,6 +558,8 @@ export async function createAiInterpretation(
   answerContract: AnswerContract,
   context?: ReadingContext,
   groqApiKey?: string,
+  requestId?: string,
+  totalTimeoutMs = INTERPRET_AI_TIMEOUT_MS,
 ): Promise<ReadingResult> {
   const contract = answerContract;
   const latestRound = Math.max(...cards.map((card) => card.round));
@@ -583,6 +697,10 @@ ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 �
     GROQ_INTERPRETATION_CORRECTION_MODEL,
     GROQ_INTERPRETATION_MAX_TOKENS,
     true,
+    {
+      workersTimeoutMs: INTERPRET_WORKERS_TIMEOUT_MS,
+      groqTimeoutMs: INTERPRET_GROQ_TIMEOUT_MS,
+    },
   );
   let lastStructurallyValid: ReadingResult | undefined;
   return runAiJson("interpret", provider, prompt, (value) => {
@@ -592,10 +710,12 @@ ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 �
       parsed,
       { expectedCards, answerContract: contract },
     );
-  }, cardsToInterpret.length <= 2 ? 3_200 : 4_000, READING_RESULT_JSON_SCHEMA, 3, 0.45, () => lastStructurallyValid);
+  }, cardsToInterpret.length <= 2 ? 3_200 : 4_000, READING_RESULT_JSON_SCHEMA, 3, 0.45, () => lastStructurallyValid, totalTimeoutMs, requestId);
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const requestStartedAt = Date.now();
+  const requestId = requestCorrelationId(request);
   try {
     const raw = await readSafeJson(request);
     const input = tarotApiRequestSchema.parse(raw);
@@ -618,11 +738,15 @@ export async function POST(request: Request): Promise<Response> {
         input.language,
         input.context,
         runtimeEnv.GROQ_API_KEY,
+        requestId,
+        remainingAiTimeoutMs(requestStartedAt, PLAN_SERVER_TIMEOUT_MS),
       );
       if (countAsFollowup) {
         await completeFollowup(request, runtimeEnv, input.context?.previousQuestions?.length ?? 0);
       }
-      return Response.json({ data, mode: "ai" }, { headers: { "cache-control": "no-store" } });
+      return Response.json({ data, mode: "ai" }, {
+        headers: { "cache-control": "no-store", "x-tarot-request-id": requestId },
+      });
     }
 
     const data = await createAiInterpretation(
@@ -634,9 +758,15 @@ export async function POST(request: Request): Promise<Response> {
       input.answerContract,
       input.context,
       runtimeEnv.GROQ_API_KEY,
+      requestId,
+      remainingAiTimeoutMs(requestStartedAt, INTERPRET_SERVER_TIMEOUT_MS),
     );
-    return Response.json({ data, mode: "ai" }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ data, mode: "ai" }, {
+      headers: { "cache-control": "no-store", "x-tarot-request-id": requestId },
+    });
   } catch (error) {
-    return apiErrorResponse(error);
+    const response = apiErrorResponse(error);
+    response.headers.set("x-tarot-request-id", requestId);
+    return response;
   }
 }
