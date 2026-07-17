@@ -168,20 +168,42 @@ describe("quota fallback AI provider", () => {
     expect(body.model).toBe("openai/gpt-oss-120b");
   });
 
-  it("does not use Groq for generic Cloudflare failures", async () => {
-    const upstreamError = new Error("429: temporary request rate limit");
+  it("uses Groq for generic Cloudflare failures", async () => {
     const fetcher = vi.fn(async () => groqSuccess()) as unknown as typeof fetch;
     const provider = createQuotaFallbackAiProvider({
-      workersAi: workersBinding(async () => { throw upstreamError; }),
+      workersAi: workersBinding(async () => { throw new Error("429: temporary request rate limit"); }),
       workersModel: "workers-model",
       groqApiKey: "test-key",
       groqModel: "openai/gpt-oss-120b",
       fetcher,
     });
 
-    await expect(provider.run(request)).rejects.toBe(upstreamError);
-    expect(provider.activeProvider).toBe("workers-ai");
-    expect(fetcher).not.toHaveBeenCalled();
+    await expect(provider.run(request)).resolves.toEqual(expect.any(Object));
+    expect(provider.activeProvider).toBe("groq");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("can move a quality correction from Workers AI to Groq", async () => {
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify({ value: "needs-correction" }) }));
+    const fetcher = vi.fn(async () => groqSuccess()) as unknown as typeof fetch;
+    const onFallback = vi.fn();
+    const provider = createQuotaFallbackAiProvider({
+      workersAi: workersBinding(workersRun),
+      workersModel: "workers-model",
+      groqApiKey: "test-key",
+      groqModel: "openai/gpt-oss-120b",
+      fetcher,
+      onFallback,
+    });
+
+    await provider.run(request);
+    expect(provider.switchToFallback?.("quality-retry")).toBe(true);
+    await provider.run({ ...request, userPrompt: "corrected" });
+
+    expect(provider.activeProvider).toBe("groq");
+    expect(workersRun).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(onFallback).toHaveBeenCalledWith("quality-retry");
   });
 
   it("uses non-thinking JSON Object Mode for the Qwen plan model", async () => {

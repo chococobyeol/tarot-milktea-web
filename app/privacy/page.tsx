@@ -44,7 +44,7 @@ export default function PrivacyPage() {
         <PolicySection title="처리하는 정보">
           <ul>
             <li>이용자가 입력한 타로 질문, 선택한 카드와 방향, 언어, 생성된 해석</li>
-            <li>브라우저에 저장되는 닉네임, 언어 설정, 진행 중인 리딩과 이용자가 직접 저장한 기록</li>
+            <li>브라우저에 저장되는 닉네임, 언어 설정, 진행 중인 리딩, 최근 추천 메뉴와 이용자가 직접 저장한 기록</li>
             <li>서비스 이용 중 처리될 수 있는 접속 정보, 익명 세션 쿠키, 요청·오류 정보와 Turnstile 봇 확인 정보</li>
           </ul>
           <p>
@@ -81,13 +81,14 @@ export default function PrivacyPage() {
               <strong>Cloudflare</strong>: 웹 호스팅, API, D1, Workers AI, Turnstile, 요청 제한과 운영 로그
             </li>
             <li>
-              <strong>Groq</strong>: Workers AI의 일일 사용 한도가 소진된 경우에만 카드 구성과 AI 해석 처리
+              <strong>Groq</strong>: Workers AI의 사용 한도·일시 오류 또는 해석 품질 보정 시 카드 구성과 AI 해석 처리
             </li>
             <li><strong>jsDelivr</strong>: 웹폰트 파일 제공</li>
           </ul>
           <p>
-            AI 해석을 위해 질문과 카드 정보가 Cloudflare Workers AI로 전송됩니다. Workers AI의 일일
-            사용 한도가 소진된 경우에는 같은 정보와 현재 리딩 문맥이 Groq로 전송됩니다. 외부 서비스에서는
+            AI 해석을 위해 질문과 카드 정보, 중복 추천 방지를 위한 최근 추천 메뉴가 Cloudflare Workers AI로
+            전송됩니다. Workers AI의 사용 한도·일시 오류 또는 품질 보정 시에는 같은 정보와 현재 리딩 문맥이
+            Groq로 전송됩니다. 외부 서비스에서는
             접속 정보와 요청 정보가 국외에서 처리될 수 있으며, 각 서비스의 정책이 적용됩니다. Groq 계정에서
             Zero Data Retention을 활성화하면 신뢰성·악용 조사 목적의 고객 데이터 보관을 중지할 수 있습니다.
           </p>
@@ -103,7 +104,7 @@ export default function PrivacyPage() {
           <p>
             서비스는 익명 세션 유지와 요청 보호를 위해 필수 세션 쿠키를 사용합니다. 광고 또는 맞춤형
             분석 쿠키는 사용하지 않습니다. 브라우저 저장을 차단하거나 삭제하면 설정 유지, 진행 중인
-            리딩 복원, 이전 기록 기능이 정상적으로 동작하지 않을 수 있습니다.
+            리딩 복원, 최근 추천 중복 방지, 이전 기록 기능이 정상적으로 동작하지 않을 수 있습니다.
           </p>
         </PolicySection>
 

@@ -1,12 +1,81 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { canUsePlanFallback, stabilizeAnswerContractReading } from "@/app/api/tarot/route";
+import { canUsePlanFallback, createAiInterpretation, stabilizeAnswerContractReading } from "@/app/api/tarot/route";
 import { enforceReadingQuality, type ExpectedInterpretation } from "@/src/lib/reading-quality";
 import { readingResultSchema } from "@/src/lib/schemas";
 import type { AnswerContract, ReadingResult } from "@/src/lib/tarot";
 import { ApiError } from "@/src/server/security";
 
 describe("candidate answer stabilization", () => {
+  it("renders an open lunch recommendation as a natural direct sentence without copying it into guidance", () => {
+    const result: ReadingResult = {
+      verdict: { kind: "recommend_one", value: "비빔밥", statement: "따뜻한 비빔밥을 추천해요." },
+      summary: "따뜻한 비빔밥을 추천해요. 여러 카드가 한 끼 식사를 지지해요.",
+      cardInterpretations: [],
+      synthesis: "카드 신호를 점심 메뉴에 적용했어요.",
+      guidance: ["재료를 한 그릇에 담아 바로 먹어요."],
+      axes: [],
+      signals: { support: 60, caution: 20, uncertainty: 20 },
+    };
+    const stabilized = stabilizeAnswerContractReading(result, {
+      kind: "recommend_one",
+      subject: "오늘 점심 메뉴 하나",
+      candidates: [],
+      decisive: true,
+    }, "점심에 뭐 먹지?", "ko");
+
+    expect(stabilized.verdict?.statement).toBe("오늘 점심은 비빔밥을 먹어요.");
+    expect(stabilized.summary).toBe("오늘 점심은 비빔밥을 먹어요. 여러 카드가 한 끼 식사를 지지해요.");
+    expect(stabilized.guidance).toEqual(result.guidance);
+  });
+
+  it("returns the last structurally valid interpretation instead of a 502 after style checks keep failing", async () => {
+    const workersRun = vi.fn(async () => ({
+      response: JSON.stringify({
+        verdict: { kind: "recommend_one", value: "비빔밥", statement: "점심 메뉴로 비빔밥을 추천해요." },
+        summary: "점심 메뉴로 비빔밥을 추천해요. 카드 신호가 이 메뉴를 가리켜요.",
+        cardInterpretations: [{
+          cardId: "major-07",
+          positionTitle: "점심 메뉴 신호",
+          orientation: "upright",
+          text: "점심에는 한 그릇으로 완성되는 메뉴가 잘 맞아요.",
+          reasoning: {
+            sourceMeaning: "",
+            questionConnection: "점심 메뉴 신호 자리에서 전차의 추진력은 여러 재료를 한 그릇에 모아 빠르게 먹는 선택으로 이어져요.",
+            decisionImpact: "이 신호는 비빔밥을 점심 메뉴로 정하는 데 강하게 작용해요.",
+          },
+        }],
+        synthesis: "전차 카드는 여러 재료를 한 번에 모아 먹는 점심 식사를 고르는 근거가 돼요.",
+        guidance: ["한 그릇에 재료를 모아 바로 먹어요."],
+        axes: [
+          { label: "카드 강도", score: 70, evidence: "전차의 추진력을 반영했어요.", evidenceCardIds: ["major-07"] },
+          { label: "상징 연결", score: 65, evidence: "한 그릇 구성을 반영했어요.", evidenceCardIds: ["major-07"] },
+          { label: "결론 선명도", score: 72, evidence: "추천이 한쪽으로 모였어요.", evidenceCardIds: ["major-07"] },
+        ],
+        signals: { support: 61, caution: 21, uncertainty: 18 },
+      }),
+    }));
+    const reading = await createAiInterpretation(
+      { run: workersRun },
+      "점심에 뭐 먹지?",
+      [{
+        cardId: "major-07",
+        reversed: false,
+        positionId: "menu-signal",
+        positionTitle: "점심 메뉴 신호",
+        positionFocus: "점심 메뉴를 정하는 카드 신호",
+        round: 0,
+      }],
+      undefined,
+      "ko",
+      { kind: "recommend_one", subject: "오늘 점심 메뉴 하나", candidates: [], decisive: true },
+    );
+
+    expect(workersRun).toHaveBeenCalledTimes(3);
+    expect(reading.verdict?.statement).toBe("오늘 점심은 비빔밥을 먹어요.");
+    expect(reading.signals.support + reading.signals.caution + reading.signals.uncertainty).toBe(100);
+  });
+
   it("does not repeat a direct outcome in the guidance list", () => {
     const result: ReadingResult = {
       verdict: {
@@ -53,7 +122,7 @@ describe("candidate answer stabilization", () => {
       decisive: true,
     };
     expect(canUsePlanFallback(openRecommendation)).toBe(false);
-    expect(canUsePlanFallback(openRecommendation, new ApiError(503, "DAILY_AI_LIMIT", "limit"))).toBe(false);
+    expect(canUsePlanFallback(openRecommendation, new ApiError(503, "DAILY_AI_LIMIT", "limit"))).toBe(true);
     expect(canUsePlanFallback(openRecommendation, new ApiError(502, "INVALID_AI_RESPONSE", "invalid"))).toBe(true);
 
     const suppliedChoice: AnswerContract = {

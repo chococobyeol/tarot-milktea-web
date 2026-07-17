@@ -127,6 +127,7 @@ export interface ReadingContext {
   previousQuestions?: string[];
   previousAnswer?: string;
   previousContract?: AnswerContract;
+  recentRecommendations?: string[];
 }
 
 const fileByTitle = new Map(
@@ -382,9 +383,26 @@ export function createAnswerContract(
   const englishOpenQuestion = /\b(?:what|how|where|when|which)\s+should\s+i\b/iu.test(normalized);
   const asksForOpenRecommendation = isOpenRecommendationQuestion(normalized);
   if (asksForOpenRecommendation) {
+    const subject = language === "ko"
+      ? /아침/u.test(current) ? "오늘 아침 메뉴 하나"
+        : /점심/u.test(current) ? "오늘 점심 메뉴 하나"
+          : /저녁/u.test(current) ? "오늘 저녁 메뉴 하나"
+            : /식사|메뉴|음식|먹|끼니|배달/u.test(current) ? "이번 식사 메뉴 하나"
+              : /옷|코디|입/u.test(current) ? "오늘 입을 옷차림 하나"
+                : /책|소설|읽/u.test(current) ? "읽을 작품 하나"
+                  : /영화|드라마|볼까|보지/u.test(current) ? "볼 작품 하나"
+                    : /어디|장소|갈까|가볼/u.test(current) ? "갈 장소 하나"
+                      : /뭐\s*하|무엇을\s*하|활동/u.test(current) ? "할 활동 하나"
+                        : current.slice(0, 100)
+      : /breakfast|lunch|dinner|meal|menu|food|eat/iu.test(current) ? "one meal for this occasion"
+        : /outfit|clothes|wear/iu.test(current) ? "one outfit to wear"
+          : /book|read/iu.test(current) ? "one work to read"
+            : /movie|show|watch/iu.test(current) ? "one work to watch"
+              : /where|place|go/iu.test(current) ? "one place to go"
+                : current.slice(0, 100);
     return {
       kind: "recommend_one",
-      subject: current.slice(0, 100),
+      subject,
       candidates: [],
       decisive: true,
     };

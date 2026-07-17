@@ -104,6 +104,7 @@ interface AppNotice {
 const SESSION_KEY = "tarot-milktea-current-reading";
 const NICKNAME_KEY = "tarot-milktea-nickname";
 const LANGUAGE_KEY = "tarot-milktea-language";
+const RECENT_RECOMMENDATIONS_KEY = "tarot-milktea-recent-recommendations";
 
 function hasAnswerContract(plan: ReadingPlan | null): boolean {
   const contract = (plan as Partial<ReadingPlan> | null)?.answerContract;
@@ -117,6 +118,23 @@ function contextAnswerContract(plan: ReadingPlan | null | undefined): AnswerCont
   return contract.kind === "recommend_one" && contract.candidates.length > 0
     ? { ...contract, candidates: [] }
     : contract;
+}
+
+function readRecentRecommendations(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_RECOMMENDATIONS_KEY) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 5);
+  } catch {
+    return [];
+  }
+}
+
+function rememberRecommendation(value: string): void {
+  const normalized = value.trim();
+  if (!normalized) return;
+  const recent = readRecentRecommendations().filter((item) => item !== normalized);
+  localStorage.setItem(RECENT_RECOMMENDATIONS_KEY, JSON.stringify([normalized, ...recent].slice(0, 5)));
 }
 
 function localDateStamp(date = new Date()): string {
@@ -710,7 +728,13 @@ export function TarotApp() {
     const minimumPlanningTime = holdStage(650);
     try {
       await ensureAnonymousSession(turnstileToken);
-      const response = await requestReadingPlan(value, false, language);
+      const recentRecommendations = readRecentRecommendations();
+      const response = await requestReadingPlan(
+        value,
+        false,
+        language,
+        recentRecommendations.length ? { recentRecommendations } : undefined,
+      );
       await minimumPlanningTime;
       setActiveQuestion(value);
       setInitialPlan(response.data);
@@ -766,12 +790,14 @@ export function TarotApp() {
   }
 
   function readingContext(): ReadingContext | undefined {
-    if (round === 0) return undefined;
+    const recentRecommendations = readRecentRecommendations();
+    if (round === 0) return recentRecommendations.length ? { recentRecommendations } : undefined;
     return {
       initialQuestion: question,
       previousQuestions: followups.map((item) => item.question),
       previousAnswer: result?.verdict?.statement ?? result?.summary,
       previousContract: contextAnswerContract(followups.at(-1)?.plan ?? initialPlan),
+      ...(recentRecommendations.length ? { recentRecommendations } : {}),
     };
   }
 
@@ -841,6 +867,9 @@ export function TarotApp() {
 
   function finishReveal() {
     if (!pendingResult) return;
+    if (pendingResult.verdict?.kind === "recommend_one") {
+      rememberRecommendation(pendingResult.verdict.value);
+    }
     const previous = result;
     const allCards = [...cards, ...latestCards];
     if (round > 0 && previous) {
@@ -882,11 +911,13 @@ export function TarotApp() {
     setFollowupOpen(false);
     const minimumPlanningTime = holdStage(650);
     try {
+      const recentRecommendations = readRecentRecommendations();
       const context: ReadingContext = {
         initialQuestion: question,
         previousQuestions: followups.map((item) => item.question),
         previousAnswer: result?.verdict?.statement ?? result?.summary,
         previousContract: contextAnswerContract(followups.at(-1)?.plan ?? initialPlan),
+        ...(recentRecommendations.length ? { recentRecommendations } : {}),
       };
       const response = await requestReadingPlan(value, true, language, context);
       await minimumPlanningTime;

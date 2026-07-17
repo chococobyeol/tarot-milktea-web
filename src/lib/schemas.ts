@@ -45,6 +45,7 @@ export const readingContextSchema = z.object({
   previousQuestions: z.array(z.string().trim().min(4).max(300)).max(2).optional(),
   previousAnswer: z.string().trim().min(1).max(1200).optional(),
   previousContract: answerContractSchema.optional(),
+  recentRecommendations: z.array(z.string().trim().min(1).max(80)).max(5).optional(),
 }).optional();
 
 export const readingPlanSchema = z.object({

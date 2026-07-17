@@ -274,9 +274,6 @@ function answerContractIssues(
     ) {
       issues.push("열린 추천의 verdict.value에는 설명이나 조건을 붙이지 말고 바로 고를 수 있는 짧은 대상·행동 이름만 써야 한다.");
     }
-    if (!normalize(result.guidance.join(" ")).includes(normalizedValue)) {
-      issues.push("guidance에서도 카드 공개 뒤 정한 구체적인 추천을 직접 실행하도록 써야 한다.");
-    }
     const supplementalText = `${result.synthesis} ${result.guidance.join(" ")}`;
     if (/(?:아니면|또는|혹은|대신).{0,36}(?:괜찮|추천|먹|입|고르|선택|해도|할 수)|(?:another|alternatively|or instead).{0,36}(?:recommend|choose|pick|eat|wear|also)/iu.test(supplementalText)) {
       issues.push("열린 추천은 결론 뒤에 다른 대안을 다시 제시하지 말고 정한 답 하나만 유지해야 한다.");

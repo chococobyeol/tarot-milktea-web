@@ -29,7 +29,10 @@ export interface AiJsonRequest {
 export interface AiJsonProvider {
   readonly activeProvider: AiProviderName;
   run(request: AiJsonRequest): Promise<unknown>;
+  switchToFallback?(reason: AiFallbackReason): boolean;
 }
+
+export type AiFallbackReason = "daily-limit" | "workers-error" | "quality-retry";
 
 export class AiProviderError extends Error {
   constructor(
@@ -55,7 +58,7 @@ interface QuotaFallbackProviderOptions {
   groqCorrectionStrictJsonSchema?: boolean;
   fetcher?: typeof fetch;
   timeoutMs?: number;
-  onFallback?: () => void;
+  onFallback?: (reason: AiFallbackReason) => void;
 }
 
 function errorDetails(error: unknown, seen = new Set<object>(), depth = 0): string {
@@ -197,6 +200,14 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
   let activeProvider: AiProviderName = "workers-ai";
   let groqCallCount = 0;
 
+  const switchToGroq = (reason: AiFallbackReason): boolean => {
+    if (!groqApiKey || activeProvider === "groq") return false;
+    activeProvider = "groq";
+    groqCallCount = 0;
+    options.onFallback?.(reason);
+    return true;
+  };
+
   const runConfiguredGroq = (request: AiJsonRequest) => {
     const useCorrectionModel = groqCallCount > 0 && Boolean(options.groqCorrectionModel);
     const model = useCorrectionModel ? options.groqCorrectionModel as string : options.groqModel;
@@ -221,6 +232,9 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
     get activeProvider() {
       return activeProvider;
     },
+    switchToFallback(reason) {
+      return switchToGroq(reason);
+    },
     async run(request) {
       if (activeProvider === "groq") {
         return runConfiguredGroq(request);
@@ -238,13 +252,16 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
           chat_template_kwargs: { enable_thinking: false },
         });
       } catch (error) {
-        if (!isWorkersAiDailyLimitError(error)) throw error;
+        const dailyLimit = isWorkersAiDailyLimitError(error);
         if (!groqApiKey) {
-          throw new AiProviderError("workers-ai", "daily_limit", false);
+          throw new AiProviderError(
+            "workers-ai",
+            dailyLimit ? "daily_limit" : "unavailable",
+            !dailyLimit,
+          );
         }
 
-        activeProvider = "groq";
-        options.onFallback?.();
+        switchToGroq(dailyLimit ? "daily-limit" : "workers-error");
         return runConfiguredGroq(request);
       }
     },

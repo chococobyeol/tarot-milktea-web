@@ -615,12 +615,12 @@ describe("enforceReadingQuality", () => {
       summary: "오늘 메뉴는 샌드위치예요. 카드 신호를 반영한 추천이에요.",
       guidance: ["먹을 수 있는지만 확인해요."],
     };
-    expect(() => enforceReadingQuality(missingGuidance, {
+    expect(enforceReadingQuality(missingGuidance, {
       question: "오늘 뭐 먹을까?",
       language: "ko",
       sourceSentences: [],
       answerContract,
-    })).toThrow(/guidance/);
+    })).toEqual(missingGuidance);
 
     const reopenedAlternative: ReadingResult = {
       ...baseResult,
