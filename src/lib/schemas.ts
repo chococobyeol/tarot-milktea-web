@@ -22,12 +22,7 @@ export const answerContractSchema = z.object({
   kind: answerKindSchema,
   subject: z.string().trim().min(1).max(160),
   candidates: z.array(z.string().trim().min(1).max(80)).max(5),
-  decisive: z.boolean(),
 }).superRefine((contract, context) => {
-  const decisiveKinds = new Set(["choose_one", "recommend_one", "yes_no", "outcome", "advice"]);
-  if (contract.decisive !== decisiveKinds.has(contract.kind)) {
-    context.addIssue({ code: "custom", message: "답변 유형과 직접 결론 여부가 일치하지 않습니다.", path: ["decisive"] });
-  }
   const candidateKinds = new Set(["choose_one", "yes_no", "compare"]);
   if (!candidateKinds.has(contract.kind) && contract.candidates.length > 0) {
     context.addIssue({ code: "custom", message: "이 답변 유형에는 선택 후보를 넣을 수 없습니다.", path: ["candidates"] });

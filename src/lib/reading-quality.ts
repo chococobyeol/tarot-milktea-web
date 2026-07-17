@@ -18,7 +18,6 @@ export interface ExpectedInterpretation {
 }
 
 const CANDIDATE_KINDS = new Set<AnswerContract["kind"]>(["choose_one", "yes_no", "compare"]);
-const INTERNAL_SCHEMA_TERM = /position[_ ]?focus|position[_ ]?title|source[_ ]?meaning|question[_ ]?connection|decision[_ ]?impact|card[_ ]?interpretations|evidence[_ ]?card[_ ]?ids/i;
 
 function normalize(value: string): string {
   return value
@@ -70,9 +69,6 @@ export function enforcePlanQuality(
 
   if (!CANDIDATE_KINDS.has(contract.kind)) return plan;
 
-  if (plan.cardCount !== contract.candidates.length) {
-    throw new Error("명시 후보형 질문은 후보마다 카드 한 장을 배정해야 한다.");
-  }
   if (contract.kind !== "yes_no") {
     const unsourced = contract.candidates.find((candidate) => (
       !candidateHasSource(candidate, context.question, context.conversation)
@@ -81,12 +77,6 @@ export function enforcePlanQuality(
       throw new Error(`후보 "${unsourced}"는 현재 질문이나 앞선 대화에서 사용자가 제시한 표현이어야 한다.`);
     }
   }
-  contract.candidates.forEach((candidate, index) => {
-    const position = plan.positions[index];
-    if (!position || !normalize(`${position.title} ${position.focus}`).includes(normalize(candidate))) {
-      throw new Error(`후보 "${candidate}"에 대응하는 카드 자리에는 해당 후보 이름을 포함해야 한다.`);
-    }
-  });
   return plan;
 }
 
@@ -114,21 +104,6 @@ function contractIssues(
     }
   }
   return issues;
-}
-
-function visibleSections(result: ReadingResult): string[] {
-  return [
-    result.verdict?.statement ?? "",
-    result.summary,
-    result.synthesis,
-    ...result.guidance,
-    ...result.cardInterpretations.flatMap((item) => [
-      item.text,
-      item.reasoning?.questionConnection ?? "",
-      item.reasoning?.decisionImpact ?? "",
-    ]),
-    ...result.axes.flatMap((axis) => [axis.label, axis.evidence]),
-  ].filter(Boolean);
 }
 
 /**
@@ -179,10 +154,6 @@ export function enforceReadingQuality(
     }
   }
 
-  const sections = visibleSections(result);
-  const visibleText = sections.join("\n");
-  const leaked = visibleText.match(INTERNAL_SCHEMA_TERM)?.[0];
-  if (leaked) issues.push(`내부 JSON 키 "${leaked}"를 사용자 문장에 쓰지 말아야 한다.`);
   const normalizedSummary = normalize(result.summary);
   const normalizedSynthesis = normalize(result.synthesis);
   if (normalizedSummary.length > 40

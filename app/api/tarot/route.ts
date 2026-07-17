@@ -40,10 +40,10 @@ import {
 } from "@/src/server/security";
 
 const WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
-const GROQ_PLAN_MODEL = "qwen/qwen3.6-27b";
+const GROQ_PLAN_MODEL = "openai/gpt-oss-120b";
 const GROQ_INTERPRETATION_MODEL = "openai/gpt-oss-120b";
 const GROQ_INTERPRETATION_CORRECTION_MODEL = GROQ_INTERPRETATION_MODEL;
-const GROQ_INTERPRETATION_MAX_TOKENS = 3_600;
+const GROQ_INTERPRETATION_MAX_TOKENS = 4_800;
 
 const SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
 - 요청에서 지정한 출력 언어로 중립적이고 분석적인 문장을 쓴다.
@@ -125,9 +125,20 @@ function normalizeSignalDistribution(value: unknown): unknown {
   return { support, caution, uncertainty: 100 - support - caution };
 }
 
+function normalizePlanShape(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  const positions = Array.isArray(record.positions) ? record.positions : [];
+  return {
+    ...record,
+    cardCount: positions.length,
+  };
+}
+
 function normalizeReadingShape(
   value: unknown,
   expectedCards: ExpectedInterpretation[],
+  answerContract: AnswerContract,
 ): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
@@ -196,12 +207,36 @@ function normalizeReadingShape(
         };
       })
     : record.axes;
+  const verdict = record.verdict && typeof record.verdict === "object" && !Array.isArray(record.verdict)
+    ? { ...(record.verdict as Record<string, unknown>), kind: answerContract.kind }
+    : record.verdict;
   return {
     ...record,
+    verdict,
     cardInterpretations,
     axes: normalizedAxes,
     signals: normalizeSignalDistribution(record.signals),
   };
+}
+
+type AiOperation = "plan" | "interpret";
+
+function validationDiagnostics(error: unknown): { validationCodes?: string[] } {
+  if (!error || typeof error !== "object" || !("issues" in error)) return {};
+  const issues = (error as { issues?: unknown }).issues;
+  if (!Array.isArray(issues)) return {};
+  const validationCodes = issues.slice(0, 6).flatMap((issue) => {
+    if (!issue || typeof issue !== "object") return [];
+    const record = issue as Record<string, unknown>;
+    const code = typeof record.code === "string" ? record.code : "unknown";
+    const path = Array.isArray(record.path)
+      ? record.path.filter((part): part is string | number => (
+          typeof part === "string" || typeof part === "number"
+        )).join(".")
+      : "";
+    return [`${code}:${path}`];
+  });
+  return validationCodes.length > 0 ? { validationCodes } : {};
 }
 
 function classifyAiFailure(error: unknown): string {
@@ -249,6 +284,7 @@ function providerApiError(error: AiProviderError): ApiError {
 }
 
 async function runAiJson<T>(
+  operation: AiOperation,
   provider: AiJsonProvider,
   prompt: string,
   validate: (value: unknown) => T,
@@ -258,8 +294,12 @@ async function runAiJson<T>(
   temperature = 0.25,
   recoverLastValid?: () => T | undefined,
 ): Promise<T> {
+  const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `ai-${Date.now()}`;
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let responseLength: number | undefined;
     try {
       const userPrompt = attempt === 0
         ? prompt
@@ -272,14 +312,18 @@ async function runAiJson<T>(
         jsonSchema,
       });
       const responseText = extractResponseText(result);
+      responseLength = responseText.length;
       return validate(parseJsonText(responseText));
     } catch (error) {
       lastError = error;
       console.warn("[tarot-ai] response rejected", {
+        requestId,
+        operation,
         attempt: attempt + 1,
         provider: provider.activeProvider,
         category: classifyAiFailure(error),
-        issue: error instanceof Error ? error.message.replace(/\s+/g, " ").slice(0, 500) : undefined,
+        responseLength,
+        ...validationDiagnostics(error),
       });
       if (error instanceof AiProviderError && !error.retryable) {
         const recovered = recoverLastValid?.();
@@ -292,10 +336,20 @@ async function runAiJson<T>(
 
   const recovered = recoverLastValid?.();
   if (recovered) {
-    console.warn("[tarot-ai] accepting structurally valid response after quality retries");
+    console.warn("[tarot-ai] accepting structurally valid response after quality retries", {
+      requestId,
+      operation,
+    });
     return recovered;
   }
   if (lastError instanceof AiProviderError) throw providerApiError(lastError);
+  console.error("[tarot-ai] all responses rejected", {
+    requestId,
+    operation,
+    provider: provider.activeProvider,
+    category: classifyAiFailure(lastError),
+    ...validationDiagnostics(lastError),
+  });
   throw new ApiError(502, "INVALID_AI_RESPONSE", "AI 응답 형식을 확인하지 못했습니다. 현재 상태를 유지하고 다시 시도하세요.");
 }
 
@@ -342,39 +396,45 @@ export async function createAiPlan(
 대화 맥락: ${JSON.stringify(context ?? null)}
 출력 언어: ${language === "ko" ? "한국어" : "English"}. JSON 키는 스키마 그대로 유지하고 모든 사용자 표시 문자열 값은 이 언어로 작성한다.
 
-질문 전체와 대화 문맥을 이해한 뒤 answerContract, 카드 수, 자리 역할을 한 번에 결정한다. 단어 하나가 아니라 사용자가 문장 전체에서 요구한 답을 기준으로 판단한다.
-- choose_one: 사용자가 제시한 후보 중 하나를 골라 달라는 요청. candidates에는 질문의 후보를 철자 그대로 2~5개 넣고 decisive=true.
-- recommend_one: 정해진 후보 없이 구체적인 대상이나 행동 하나를 추천해 달라는 요청. candidates는 반드시 빈 배열이고 decisive=true다. 카드 공개 전에는 내부적으로도 후보 목록을 만들지 않는다. 카드를 모두 해석한 뒤에만 질문의 제약 안에서 구체적인 답 하나를 생성한다.
-- yes_no: 해야 하는지, 가능한지처럼 예/아니요 방향을 요청. 출력 언어의 예/아니요 후보 2개와 decisive=true.
-- outcome: 성공·실패, 합격·불합격, 성사 여부처럼 사건의 결과를 묻는 질문. candidates는 빈 배열이고 decisive=true다. 카드 수와 역할은 질문의 복잡도에 따라 정한다.
-- compare: 후보의 차이만 비교하고 선택까지 요구하지 않는 질문. 질문에 나온 후보를 candidates에 넣고 decisive=false.
+질문 전체와 대화 문맥을 이해한 뒤 answerContract와 자리 역할을 한 번에 결정한다. 단어 하나가 아니라 사용자가 문장 전체에서 요구한 답을 기준으로 판단한다.
+- choose_one: 사용자가 제시한 후보 중 하나를 골라 달라는 요청. candidates에는 질문의 후보를 철자 그대로 2~5개 넣는다.
+- recommend_one: 정해진 후보 없이 구체적인 대상이나 행동 하나를 추천해 달라는 요청. candidates는 반드시 빈 배열이다. 카드 공개 전에는 내부적으로도 후보 목록을 만들지 않는다. 카드를 모두 해석한 뒤에만 질문의 제약 안에서 구체적인 답 하나를 생성한다.
+- yes_no: 해야 하는지, 가능한지처럼 예/아니요 방향을 요청. 출력 언어의 예/아니요 후보 2개를 넣는다.
+- outcome: 성공·실패, 합격·불합격, 성사 여부처럼 사건의 결과를 묻는 질문. candidates는 빈 배열이다. 자리 수와 역할은 질문의 복잡도에 따라 정한다.
+- compare: 후보의 차이만 비교하고 선택까지 요구하지 않는 질문. 질문에 나온 후보를 candidates에 넣는다.
 - forecast: 시기, 가능성, 향후 흐름을 묻는 질문.
-- advice: 무엇을 하거나 어떻게 대응할지 먼저 할 행동을 묻는 질문이며 decisive=true.
-- explain: 이유나 원인을 묻는 질문이며 decisive=false.
-- analysis: 위 유형이 아닌 상태·관계·의미 분석 질문이며 decisive=false.
-decisive는 choose_one, recommend_one, yes_no, outcome, advice에서 true이고 compare, forecast, explain, analysis에서는 false이다.
+- advice: 무엇을 하거나 어떻게 대응할지 먼저 할 행동을 묻는 질문.
+- explain: 이유나 원인을 묻는 질문.
+- analysis: 위 유형이 아닌 상태·관계·의미 분석 질문.
 후속 질문이 앞선 결론을 이어 가는지 새 대상을 묻는지도 문맥으로 판단한다. 명시 후보는 현재 질문이나 previousContract에서 사용자가 제시한 것만 사용할 수 있다. recommend_one에는 후보를 만들거나 상속하지 않는다.
 answerContract.subject에는 지금 답해야 할 대상을 짧고 구체적으로 적는다. candidates가 필요 없는 유형은 빈 배열을 쓴다.
 
-카드 수는 질문에 실제로 필요한 서로 다른 역할의 수에 따라 1~5장으로 정한다. 질문 글자 수나 특정 단어가 아니라, 답을 내는 데 필요한 관점 수를 기준으로 한다. 의미가 겹치는 자리를 카드 수를 늘리기 위해 만들지 않는다.
-choose_one, yes_no, compare는 후보마다 카드 한 장을 배정하므로 cardCount와 positions 길이를 candidates 길이와 같게 한다. 각 position의 title 또는 focus에 해당 후보 이름을 철자 그대로 넣는다.
+positions는 질문에 실제로 필요한 서로 다른 역할의 수에 따라 1~5개로 정한다. positions 길이가 사용자가 뽑을 카드 수가 된다. 질문 글자 수나 특정 단어가 아니라, 답을 내는 데 필요한 관점 수를 기준으로 한다. 의미가 겹치는 자리를 수를 늘리기 위해 만들지 않는다.
+choose_one, yes_no, compare도 후보 수에 기계적으로 맞추지 말고, 질문을 제대로 판단하는 데 필요한 역할을 1~5개로 구성한다. 후보별 자리가 필요하다면 사용하되 자리 이름에 후보 문구를 억지로 반복하지 않는다.
 recommend_one은 후보별 자리를 만들지 않는다. 질문에 답하기 위해 필요한 서로 다른 역할만 만든다. 구체적인 추천 대상은 카드 공개 뒤 해석 단계에서 처음 정한다.
 각 title은 화면에서 바로 이해되는 짧은 라벨이고, focus는 그 카드가 최종 답에 어떤 정보를 더할지 구체적으로 설명한다. 어느 질문에나 그대로 붙는 추상적인 자리나 설문 문항 같은 표현을 피한다.
 응답 JSON 스키마:
 {
-  "cardCount": 1~5 정수,
   "interpretationFrame": "이번 리딩이 분석할 기준",
   "selectionGuide": "카드 선택 안내 한 문장",
   "positions": [{ "id": "고유 영문 ID", "title": "자리 이름", "focus": "이 자리가 살펴볼 관점" }],
-  "answerContract": { "kind": "choose_one|recommend_one|yes_no|outcome|compare|forecast|advice|explain|analysis", "subject": "직접 답할 대상", "candidates": [], "decisive": true }
+  "answerContract": { "kind": "choose_one|recommend_one|yes_no|outcome|compare|forecast|advice|explain|analysis", "subject": "직접 답할 대상", "candidates": [] }
 }
-positions 길이는 cardCount와 같아야 한다.
 interpretationFrame은 자리 이름을 다시 나열하지 말고, 이번 리딩에서 무엇을 판단할지 한 문장으로 쓴다.`;
-  const provider = createReadingAiProvider(ai, groqApiKey, GROQ_PLAN_MODEL, 900, false);
-  return runAiJson(provider, prompt, (value) => enforcePlanQuality(
-    readingPlanSchema.parse(value),
+  const provider = createReadingAiProvider(
+    ai,
+    groqApiKey,
+    GROQ_PLAN_MODEL,
+    1_600,
+    true,
+    GROQ_PLAN_MODEL,
+    1_600,
+    true,
+  );
+  return runAiJson("plan", provider, prompt, (value) => enforcePlanQuality(
+    readingPlanSchema.parse(normalizePlanShape(value)),
     { question, language, conversation: context },
-  ), 900, READING_PLAN_JSON_SCHEMA);
+  ), 1_200, READING_PLAN_JSON_SCHEMA, 3, 0.2);
 }
 
 export async function createAiInterpretation(
@@ -417,10 +477,10 @@ export async function createAiInterpretation(
     const card = getCard(selected.cardId);
     const meaning = card[selected.reversed ? "reversed" : "upright"];
     return {
-      selected: {
-        positionId: selected.positionId,
-        positionTitle: selected.positionTitle,
-        positionFocus: selected.positionFocus,
+      placement: {
+        id: selected.positionId,
+        title: selected.positionTitle,
+        focus: selected.positionFocus,
         orientation: selected.reversed ? "reversed" : "upright",
         orientationLabel: orientationLabel(selected.reversed, language),
       },
@@ -461,7 +521,7 @@ export async function createAiInterpretation(
       : "추가 질문이 새로운 대상이나 답변 계약을 다루므로 axes는 현재 질문에 맞게 새로 만들고, 이전 label을 억지로 재사용하지 않는다."
     : "";
   const contractGuide = `답변 계약: ${JSON.stringify(contract)}
-- verdict.kind는 answerContract.kind와 같아야 한다.
+- verdict에는 value와 statement만 출력한다. kind는 서버가 답변 계약에서 보존한다.
 - verdict.value에는 질문에 대한 실제 답만 짧게 쓴다. 질문을 되풀이하거나 판단 기준만 답으로 쓰지 않는다.
 - verdict.statement는 verdict.value를 포함하고, 현재 질문을 보지 않아도 무엇에 대한 답인지 이해되는 자연스러운 한 문장이다.
 - choose_one과 yes_no에서는 candidates 중 정확히 하나를 verdict.value로 고른다. 둘 이상을 합치거나 후보 밖 답을 만들지 않는다.
@@ -470,7 +530,7 @@ export async function createAiInterpretation(
 - 어떤 분야든 질문에 답하는 데 필요한 속성이나 상태를 카드 상징에서 자유롭게 추론하고, 그 추정이 어떤 원뜻과 자리에서 나온 것인지 설명한다.
 - compare는 핵심 차이를, forecast는 가장 가능성이 큰 방향이나 시기를, advice는 먼저 할 행동을, explain은 중심 원인을, analysis는 가장 중요한 발견을 verdict.value에 직접 쓴다.
 - 첫 문장만 읽어도 요청한 답의 형태가 충족되어야 한다. 질문을 다시 말하거나 "살펴본다/확인한다"로 끝내지 않는다.
-- decisive=true이면 답을 미루거나 복수 대안을 다시 열지 않는다. 주의 신호는 결론을 취소하는 문장이 아니라 그 결론의 근거로 설명한다.
+- choose_one, recommend_one, yes_no, outcome, advice에서는 답을 미루거나 복수 대안을 다시 열지 않는다. 주의 신호는 결론을 취소하는 문장이 아니라 그 결론의 근거로 설명한다.
 - 후보 비교형에서도 각 후보 자리에 놓인 카드 원뜻을 후보의 실제 차이와 예상 결과에 연결한다.
 - 후보 비교형 axes는 후보마다 하나씩 만들고 각 label을 해당 후보 이름으로 시작한다. 후보가 2개라서 최소 3개 축이 필요할 때는 선택이면 "결론 선명도", compare이면 "비교 선명도" 축 하나만 추가한다. 질문에 없는 별도 평가 속성을 축으로 만들지 않는다.
 - recommend_one의 axes는 공개 전 만들지 않은 대안들을 사후에 나열하지 않고, 카드 역할과 질문의 실제 판단 신호를 3~5개 축으로 표시한다.
@@ -484,12 +544,12 @@ ${contractGuide}
 이전 결과의 연결 정보(문체를 모방하지 말 것): ${JSON.stringify(previousContext)}
 
 필수 JSON 필드:
-- verdict: answerContract를 실행한 직접 답이다. kind, value, statement를 모두 쓴다.
+- verdict: answerContract를 실행한 직접 답이다. value와 statement를 쓴다. kind는 출력하지 않는다.
 - summary: 화면에서 verdict.statement 바로 아래에 표시할 근거 설명만 1~2문장으로 쓴다. verdict.statement를 되풀이하거나 앞에 붙이지 않고, 카드 이름이나 키워드만 나열하지 않으며 결론을 다시 흐리지 않는다.
-- cardInterpretations: 정확히 ${expectedCards.length}개이며 중복을 만들지 않는다. 다음 순서와 cardId, positionTitle, orientation 값을 그대로 사용한다: ${JSON.stringify(expectedCards.map(({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, evidence }) => ({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, evidence })))}.
+- cardInterpretations: 정확히 ${expectedCards.length}개이며 중복을 만들지 않는다. 다음 순서와 cardId, positionTitle, orientation 값을 그대로 사용한다: ${JSON.stringify(expectedCards.map(({ cardId, cardName, positionTitle, positionFocus, orientation, orientationLabel: direction, sourceKeywords, evidence }) => ({ cardId, cardName, positionTitle, roleFocus: positionFocus, orientation, orientationLabel: direction, sourceKeywords, evidence })))}.
   - text: 먼저 읽히는 결론이다. 질문에 적용할 판단을 25~90자로 직접 쓴다.
   - reasoning.sourceMeaning: 위 카드의 coreMeaning과 sourceKeywords를 바꾸지 말고 출력 언어의 자연스러운 문장으로 45~140자 안에서 설명한다.
-  - reasoning.questionConnection: 왜 그 원뜻이 이 질문의 이 자리에 해당하는지 80~200자로 설명한다. positionTitle을 철자 그대로 쓰고 positionFocus와 연결되는 논리를 명시한다. 원뜻과 결론 사이를 건너뛰지 않는다.
+  - reasoning.questionConnection: 왜 그 원뜻이 이 질문의 이 자리에 해당하는지 80~200자로 설명한다. 지정된 자리 이름을 자연스럽게 언급하고 그 자리가 살펴보는 초점과 연결되는 논리를 명시한다. 원뜻과 결론 사이를 건너뛰지 않는다.
   - reasoning.decisionImpact: 이 카드가 전체 결론을 지지하는지 반대하는지, 최종 답에 얼마나 강하게 작용하는지를 45~150자로 설명한다. 이미 내린 결론을 조건부로 다시 열지 않는다.
   - evidence는 서버가 위 카드 데이터에서 직접 넣으므로 JSON에 출력하지 않는다.
 - synthesis: 정확히 카드당 한 문장씩 ${expectedCards.length}문장으로 쓴다. 각 문장은 카드 이름으로 시작하고 그 카드가 결론을 뒷받침하는 이유를 질문의 말로 설명한다. 카드를 사람처럼 행동하는 주어로 쓰지 말고, 카드가 어떤 판단의 근거가 되는지 쓴다. 카드 문장 뒤에 전체를 다시 요약하는 결론 문장을 추가하지 않는다.
@@ -499,7 +559,7 @@ ${contractGuide}
 
 JSON 자료형 예시:
 {
-  "verdict": { "kind": "answerContract.kind", "value": "직접 답", "statement": "직접 답 한 문장" },
+  "verdict": { "value": "직접 답", "statement": "직접 답 한 문장" },
   "summary": "문자열",
   "cardInterpretations": [{ "cardId": "문자열", "positionTitle": "문자열", "orientation": "upright", "text": "문자열", "reasoning": { "sourceMeaning": "문자열", "questionConnection": "문자열", "decisionImpact": "문자열" } }],
   "synthesis": "문자열",
@@ -509,7 +569,6 @@ JSON 자료형 예시:
 }
 
 한국어의 text, questionConnection, decisionImpact를 합쳐 읽었을 때 질문에 나온 대상과 행동이 분명해야 한다. sourceMeaning은 카드 원뜻만 정확히 설명하고, questionConnection에서 원뜻→자리 역할→결론의 이유를 순서대로 연결한다. 추상명사를 세 개 이상 이어 붙이거나 "적절하다", "필요하다"로만 결론내리지 않는다.
-positionFocus, positionTitle, sourceMeaning, questionConnection, decisionImpact, evidenceCardIds 같은 JSON 키 이름을 사용자에게 보이는 문장에 쓰지 않는다.
 recommend_one에서는 카드 공개 전 후보가 없다. 모든 카드를 해석한 뒤 질문에 직접 답하는 구체적인 대상이나 행동 하나를 처음 생성한다. 직접 추천하는 행위와 확인되지 않은 사실을 만드는 행위를 혼동하지 않는다.
 질문에 답하기 위해 카드 상징에서 필요한 사실과 가능성을 자유롭게 추론할 수 있다. 추론을 회피하지 말고 카드 원뜻과 자리 역할에서 해당 결론이 나온 과정을 설명한다. 다만 실제 검사 결과, 출처가 있는 통계, 정확한 수치나 진단을 받은 것처럼 가짜 출처를 만들지는 않는다.
 추가 질문이면 이전 해석을 반복하지 말고 변화한 판단과 새 카드의 영향에 집중한다.
@@ -523,11 +582,11 @@ ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 �
     true,
     GROQ_INTERPRETATION_CORRECTION_MODEL,
     GROQ_INTERPRETATION_MAX_TOKENS,
-    false,
+    true,
   );
   let lastStructurallyValid: ReadingResult | undefined;
-  return runAiJson(provider, prompt, (value) => {
-    const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards));
+  return runAiJson("interpret", provider, prompt, (value) => {
+    const parsed = readingResultSchema.parse(normalizeReadingShape(value, expectedCards, contract));
     lastStructurallyValid = parsed;
     return enforceReadingQuality(
       parsed,

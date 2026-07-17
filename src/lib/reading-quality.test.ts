@@ -21,7 +21,6 @@ function analysisPlan(cardCount: number): ReadingPlan {
       kind: "analysis",
       subject: "질문의 핵심",
       candidates: [],
-      decisive: false,
     },
   };
 }
@@ -41,7 +40,6 @@ function reading(contract: AnswerContract = {
   kind: "analysis",
   subject: "질문의 핵심",
   candidates: [],
-  decisive: false,
 }): ReadingResult {
   return {
     verdict: {
@@ -98,7 +96,6 @@ describe("domain-neutral plan validation", () => {
         kind: "choose_one",
         subject: "두 선택 중 하나",
         candidates: ["왼쪽", "오른쪽"],
-        decisive: true,
       },
     };
     expect(enforcePlanQuality(plan, {
@@ -118,7 +115,6 @@ describe("domain-neutral plan validation", () => {
         kind: "choose_one",
         subject: "AI가 만든 선택",
         candidates: ["첫 번째", "두 번째"],
-        decisive: true,
       },
     };
     expect(() => enforcePlanQuality(plan, {
@@ -136,14 +132,36 @@ describe("domain-neutral plan validation", () => {
         { id: "a", title: "A안", focus: "A안의 추가 신호" },
         { id: "b", title: "B안", focus: "B안의 추가 신호" },
       ],
-      answerContract: { kind: "choose_one", subject: "앞선 선택", candidates: ["A안", "B안"], decisive: true },
+      answerContract: { kind: "choose_one", subject: "앞선 선택", candidates: ["A안", "B안"] },
     };
     expect(enforcePlanQuality(plan, {
       question: "그래서 어느 쪽이야?",
       language: "ko",
       conversation: {
-        previousContract: { kind: "choose_one", subject: "두 안", candidates: ["A안", "B안"], decisive: true },
+        previousContract: { kind: "choose_one", subject: "두 안", candidates: ["A안", "B안"] },
       },
+    })).toBe(plan);
+  });
+
+  it("accepts semantic yes/no roles without repeating the candidate literals", () => {
+    const plan: ReadingPlan = {
+      cardCount: 2,
+      interpretationFrame: "강화 성공 여부를 서로 반대되는 신호로 확인해요.",
+      selectionGuide: "성공과 실패를 가리키는 카드 두 장을 선택해요.",
+      positions: [
+        { id: "success", title: "성공 신호", focus: "강화 결과를 성공 쪽으로 기울이는 흐름" },
+        { id: "failure", title: "실패 신호", focus: "강화 결과를 실패 쪽으로 기울이는 흐름" },
+      ],
+      answerContract: {
+        kind: "yes_no",
+        subject: "강화 성공 여부",
+        candidates: ["예", "아니요"],
+      },
+    };
+
+    expect(enforcePlanQuality(plan, {
+      question: "강화에 성공할까요?",
+      language: "ko",
     })).toBe(plan);
   });
 });
@@ -153,7 +171,7 @@ describe("domain-neutral interpretation validation", () => {
     const result = reading();
     expect(enforceReadingQuality(result, {
       expectedCards: [expectedCard],
-      answerContract: { kind: "analysis", subject: "새로운 질문", candidates: [], decisive: false },
+      answerContract: { kind: "analysis", subject: "새로운 질문", candidates: [] },
     })).toBe(result);
   });
 
@@ -165,12 +183,11 @@ describe("domain-neutral interpretation validation", () => {
     })).toThrow(/카드 ID/);
   });
 
-  it("rejects a decisive choice outside the supplied candidates", () => {
+  it("rejects a choice outside the supplied candidates", () => {
     const contract: AnswerContract = {
       kind: "choose_one",
       subject: "두 선택 중 하나",
       candidates: ["A안", "B안"],
-      decisive: true,
     };
     const result = reading(contract);
     expect(() => enforceReadingQuality(result, {
@@ -184,7 +201,7 @@ describe("domain-neutral interpretation validation", () => {
     result.summary = `${result.verdict?.statement} 전차의 추진력이 결론을 앞당겨요.`;
     expect(() => enforceReadingQuality(result, {
       expectedCards: [expectedCard],
-      answerContract: { kind: "analysis", subject: "새로운 질문", candidates: [], decisive: false },
+      answerContract: { kind: "analysis", subject: "새로운 질문", candidates: [] },
     })).toThrow(/되풀이하지 말아야/);
   });
 });

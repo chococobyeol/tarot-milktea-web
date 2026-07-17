@@ -50,7 +50,6 @@ describe("AI-owned reading structures", () => {
           kind: "analysis",
           subject: "현재 질문의 핵심",
           candidates: [],
-          decisive: false,
         },
       });
       expect(plan.cardCount).toBe(count);
@@ -78,7 +77,6 @@ describe("AI-owned reading structures", () => {
         kind: "analysis",
         subject: "현재 흐름",
         candidates: [],
-        decisive: false,
       },
     }).success).toBe(true);
   });

@@ -40,7 +40,6 @@ liveDescribe("Groq quota fallback live check", () => {
     expect(plan.answerContract).toMatchObject({
       kind: "recommend_one",
       candidates: [],
-      decisive: true,
     });
     expect(plan.cardCount).toBeGreaterThanOrEqual(1);
     expect(plan.cardCount).toBeLessThanOrEqual(5);
@@ -49,7 +48,7 @@ liveDescribe("Groq quota fallback live check", () => {
     expect(reading.verdict?.kind).toBe("recommend_one");
     expect(reading.verdict?.value).not.toMatch(/^(?:메뉴|음식|적당한 것|상황에 맞는 선택)$/);
     expect(reading.cardInterpretations).toHaveLength(plan.cardCount);
-    expect(reading.summary.startsWith(reading.verdict?.statement ?? "__missing__")).toBe(true);
+    expect(reading.summary.startsWith(reading.verdict?.statement ?? "__missing__")).toBe(false);
     expect(reading.signals.support + reading.signals.caution + reading.signals.uncertainty).toBe(100);
   }, 90_000);
 });

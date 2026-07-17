@@ -80,35 +80,35 @@ AI 요청은 설계와 해석으로 분리한다.
 
 ### 4.1 카드 구성
 
-브라우저가 질문, 후속 질문 여부, 언어와 이전 답변 문맥을 `/api/tarot`에 보낸다. Workers AI 또는 Groq의 계획 모델이 질문 전체를 이해해 답변 형태, 1~5장의 카드 수와 각 자리 역할을 한 번에 결정한다. 이 `ReadingPlan`이 이후 해석의 단일 기준이며 서버가 질문 키워드, 글자 수 또는 분야별 정규식으로 다시 분류하지 않는다. 열린 추천은 구성 단계에서 후보를 만들지 않고 `answerContract.candidates`를 빈 배열로 유지한다. 명시 후보형은 AI가 추출한 후보가 현재 질문 또는 앞선 계약에 실제로 존재하는지만 서버가 확인한다. 두 AI 공급자를 모두 사용할 수 없으면 규칙 기반 의미 추정으로 대신하지 않고 현재 상태를 유지한 채 재시도 오류를 반환한다.
+브라우저가 질문, 후속 질문 여부, 언어와 이전 답변 문맥을 `/api/tarot`에 보낸다. Workers AI 또는 Groq의 계획 모델이 질문 전체를 이해해 답변 계약과 1~5개의 자리 역할을 결정한다. 서버는 `positions.length`에서 `cardCount`를 기계적으로 파생하며, 질문 키워드·글자 수·분야별 정규식으로 의미나 카드 수를 다시 판정하지 않는다. 이 `ReadingPlan`이 이후 해석의 단일 기준이다. 열린 추천은 구성 단계에서 후보를 만들지 않고 `answerContract.candidates`를 빈 배열로 유지한다. 명시 후보형은 AI가 추출한 후보가 현재 질문 또는 앞선 계약에 실제로 존재하는지만 서버가 확인한다. 두 AI 공급자를 모두 사용할 수 없으면 규칙 기반 의미 추정으로 대신하지 않고 현재 상태를 유지한 채 재시도 오류를 반환한다.
 
 응답 주요 필드:
 
-- `cardCount`
+- `cardCount` (`positions.length`에서 서버가 파생)
 - `positions[].id`
 - `positions[].title`
 - `positions[].focus`
 - `interpretationFrame`
 - `selectionGuide`
 - `answerContract.kind`: `choose_one`, `recommend_one`, `yes_no`, `outcome`, `compare`, `forecast`, `advice`, `explain`, `analysis`
-- `answerContract.subject`, `answerContract.candidates`, `answerContract.decisive` (`recommend_one`의 `candidates`는 항상 `[]`)
+- `answerContract.subject`, `answerContract.candidates` (`recommend_one`의 `candidates`는 항상 `[]`)
 
 ### 4.2 카드 해석
 
-브라우저가 질문, 선택 카드 ID, 정·역방향, 자리, 설계 단계의 `answerContract`, 이전 결과와 구조화된 후속 질문 문맥을 전송한다. 서버는 선택된 카드의 로컬 의미 데이터만 프롬프트에 추가한다.
+브라우저가 질문, 선택 카드 ID, 정·역방향, 자리, 설계 단계의 `answerContract`, 이전 결과와 구조화된 후속 질문 문맥을 전송한다. 서버는 선택된 카드의 로컬 의미 데이터만 프롬프트에 추가한다. 해석 AI는 직접 답과 설명을 작성하고, 서버는 보존한 `answerContract.kind`에서 `verdict.kind`를 파생한다.
 
-해석도 Workers AI를 우선 사용한다. Workers AI 한도·일시 오류가 발생하거나 첫 해석이 구조 검사를 통과하지 못하면 Groq의 `openai/gpt-oss-120b`로 전환한다. Groq 첫 응답에는 Strict JSON Schema를 적용하고, 보정도 더 작은 모델로 내리지 않고 같은 120B를 JSON Object Mode로 사용한다. 서버는 카드 ID·자리·방향·근거 ID·배열 길이·후보 출처·점수 범위와 신호 합계만 검증하거나 정규화한다. 질문 의미, 분야별 어휘와 한국어 문장은 AI가 작성하며 서버가 정규식 치환으로 고치지 않는다. 최대 세 번의 생성 중 구조적으로 유효한 마지막 응답은 문체 같은 부가 조건만으로 502 처리하지 않는다.
+설계와 해석 모두 Workers AI를 우선 사용한다. Workers AI 한도·일시 오류가 발생하거나 첫 응답이 구조 검사를 통과하지 못하면 Groq의 `openai/gpt-oss-120b`로 전환하며, 첫 응답과 보정 응답에 같은 Strict JSON Schema를 적용한다. 서버는 카드 ID·자리·방향·근거 ID·배열 길이·후보 출처·점수 범위와 신호 합계만 검증하거나 정규화한다. 질문 의미, 분야별 어휘와 한국어 문장은 AI가 작성하며 서버가 정규식 치환으로 고치지 않는다. 최대 세 번의 생성 중 구조적으로 유효한 마지막 응답은 문체 같은 부가 조건만으로 502 처리하지 않는다.
 
 응답 주요 필드:
 
 - 종합 요약과 판단 기준
-- `verdict.kind`, `verdict.value`, `verdict.statement`: 질문이 요구한 형태의 직접 답
+- `verdict.kind` (계약에서 서버가 파생), `verdict.value`, `verdict.statement`: 질문이 요구한 형태의 직접 답
 - 카드별 원뜻, 질문 연결 근거와 판단 영향
 - 확인할 점
 - 신호 분포: 지지, 주의, 불확실성
 - 질문별 3~5개 해석 축과 근거 카드
 
-`src/lib/schemas.ts`의 Zod 스키마가 요청과 응답 형태를 검증하고, `src/lib/reading-quality.ts`가 직접 답의 존재, 후보 보존, 첫 문장의 결론, 한국어 구체성, 카드 근거, 질문 범위 이탈과 내부 필드 노출을 검사한다. AI가 작성한 본문을 고정 문장으로 다시 만들지는 않는다. 카드 ID·방향·원뜻·원자료 표시는 서버 데이터로 고정하되, 취향·맛·포만감·영양·몸 상태·상대 감정·성공 여부와 미래 흐름은 카드 상징을 근거로 자유롭게 추론할 수 있다. 품질 검사를 통과하지 못한 AI 응답만 오류 이유와 함께 제한된 횟수로 재시도한다.
+`src/lib/schemas.ts`의 Zod 스키마와 `src/lib/reading-quality.ts`는 직접 답의 존재, 후보 출처, 카드 근거, 배열과 점수 범위 같은 기계적 무결성을 검사한다. 질문 키워드나 분야별 어휘로 정상 응답을 거부하지 않고, AI가 작성한 문장을 정규식이나 고정 문장으로 다시 쓰지 않는다. 카드 ID·방향·원뜻·원자료 표시는 서버 데이터로 고정하되, 취향·맛·포만감·영양·몸 상태·상대 감정·성공 여부와 미래 흐름은 카드 상징을 근거로 자유롭게 추론할 수 있다. 품질 검사를 통과하지 못한 AI 응답만 오류 이유와 함께 제한된 횟수로 재시도한다.
 
 후속 질문은 이전 질문을 문자열로 합치지 않고 `initialQuestion`, `previousQuestions`, `previousAnswer`, `previousContract`로 전달한다. 명시적 후보 선택 뒤의 “그래서 정확히 어느 쪽” 같은 질문은 이전 후보를 이어받는다. 열린 추천은 이전 후보 대신 이전에 생성된 답과 카드 문맥을 전달하며, 새로운 대상의 질문은 이전 후보나 그래프 축을 상속하지 않는다. 같은 브라우저의 최근 열린 추천값은 최대 5개만 `recentRecommendations`로 보내고, 전체 카드 조합이 강하게 지지하지 않는 한 같은 추천을 반복하지 않도록 사용한다.
 

@@ -8,7 +8,6 @@ import type { AnswerContract } from "@/src/lib/tarot";
 
 function aiPlan(cardCount: number) {
   return {
-    cardCount,
     interpretationFrame: "질문에 답하는 데 필요한 역할을 카드로 읽어요.",
     selectionGuide: `${cardCount}장의 카드를 선택해요.`,
     positions: Array.from({ length: cardCount }, (_, index) => ({
@@ -20,13 +19,12 @@ function aiPlan(cardCount: number) {
       kind: "analysis",
       subject: "질문의 핵심",
       candidates: [],
-      decisive: false,
     },
   };
 }
 
 describe("AI-owned planning", () => {
-  it("keeps four roles chosen by the AI for a short question", async () => {
+  it("derives four cards from the AI-selected roles for a short question", async () => {
     const workersRun = vi.fn(async () => ({ response: JSON.stringify(aiPlan(4)) }));
     const plan = await createAiPlan(
       { run: workersRun },
@@ -40,7 +38,7 @@ describe("AI-owned planning", () => {
     expect(request.messages[1].content).not.toMatch(/length\s*[><=]|\d+자\s*(?:이상|미만)/i);
   });
 
-  it("keeps two roles chosen by the AI for a long question", async () => {
+  it("derives two cards from the AI-selected roles for a long question", async () => {
     const workersRun = vi.fn(async () => ({ response: JSON.stringify(aiPlan(2)) }));
     const plan = await createAiPlan(
       { run: workersRun },
@@ -57,7 +55,6 @@ describe("AI-owned planning", () => {
       kind: "explain",
       subject: "계속 같은 고민을 하는 원인",
       candidates: [],
-      decisive: false,
     };
     const workersRun = vi.fn(async () => ({ response: JSON.stringify(payload) }));
     const plan = await createAiPlan(
@@ -68,6 +65,35 @@ describe("AI-owned planning", () => {
     );
     expect(plan.answerContract.kind).toBe("explain");
   });
+
+  it("accepts yes/no roles that describe meaning instead of repeating 예 and 아니요", async () => {
+    const workersRun = vi.fn(async () => ({
+      response: JSON.stringify({
+        interpretationFrame: "강화 성공 여부를 반대되는 두 신호로 확인해요.",
+        selectionGuide: "카드 두 장을 선택해요.",
+        positions: [
+          { id: "success", title: "성공 신호", focus: "강화가 성공할 가능성을 높이는 흐름" },
+          { id: "failure", title: "실패 신호", focus: "강화가 실패할 가능성을 높이는 흐름" },
+        ],
+        answerContract: {
+          kind: "yes_no",
+          subject: "강화 성공 여부",
+          candidates: ["예", "아니요"],
+        },
+      }),
+    }));
+
+    const plan = await createAiPlan(
+      { run: workersRun },
+      "강화에 성공할까요?",
+      false,
+      "ko",
+    );
+
+    expect(plan.cardCount).toBe(2);
+    expect(plan.positions.map((position) => position.title)).toEqual(["성공 신호", "실패 신호"]);
+    expect(workersRun).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("generic interpretation", () => {
@@ -76,11 +102,10 @@ describe("generic interpretation", () => {
       kind: "recommend_one",
       subject: "새 캐릭터 이름 하나",
       candidates: [],
-      decisive: true,
     };
     const workersRun = vi.fn(async () => ({
       response: JSON.stringify({
-        verdict: { kind: "recommend_one", value: "루미", statement: "새 캐릭터 이름은 루미가 좋아요." },
+        verdict: { value: "루미", statement: "새 캐릭터 이름은 루미가 좋아요." },
         summary: "별 카드의 밝은 이미지가 기억하기 쉬운 이름과 이어져요.",
         cardInterpretations: [{
           cardId: "major-17",
@@ -121,6 +146,7 @@ describe("generic interpretation", () => {
     );
 
     expect(result.verdict?.statement).toBe("새 캐릭터 이름은 루미가 좋아요.");
+    expect(result.verdict?.kind).toBe("recommend_one");
     expect(workersRun).toHaveBeenCalledTimes(1);
   });
 });

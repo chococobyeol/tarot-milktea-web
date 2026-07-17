@@ -56,7 +56,6 @@ export interface AnswerContract {
   kind: AnswerKind;
   subject: string;
   candidates: string[];
-  decisive: boolean;
 }
 
 export interface ReadingPlan {
