@@ -2,7 +2,7 @@ import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { readingResultSchema, tarotApiRequestSchema } from "@/src/lib/schemas";
+import { readingPlanSchema, readingResultSchema, tarotApiRequestSchema } from "@/src/lib/schemas";
 import {
   createSessionDeck,
   createAnswerContract,
@@ -257,10 +257,49 @@ describe("reading design and interpretation", () => {
     ["Tea or coffee — which one should I choose?", "choose_one"],
     ["Which book should I read?", "recommend_one"],
     ["What should I read next?", "recommend_one"],
+    ["어디 갈까?", "recommend_one"],
+    ["어디로 갈까?", "recommend_one"],
+    ["주말에 뭐 하지?", "recommend_one"],
+    ["무슨 노래 들을까?", "recommend_one"],
+    ["그래서 정확히 무슨 메뉴를 먹으라는 건데", "recommend_one"],
     ["Compare A and B", "compare"],
     ["A, B, or C: which should I pick?", "choose_one"],
   ])("classifies the requested answer shape for %s", (question, kind) => {
     expect(createAnswerContract(question).kind).toBe(kind);
+  });
+
+  it("keeps an open recommendation unbounded until the cards are revealed", () => {
+    const plan = designReading("아침 뭐 먹을까?");
+
+    expect(plan.answerContract).toMatchObject({
+      kind: "recommend_one",
+      candidates: [],
+      decisive: true,
+    });
+    expect(plan.cardCount).toBeGreaterThanOrEqual(1);
+    expect(plan.cardCount).toBeLessThanOrEqual(3);
+    expect(plan.positions).toHaveLength(plan.cardCount);
+    expect(plan.positions.every((position) => !position.title.endsWith(" 선택"))).toBe(true);
+    expect(plan.positions.every((position) => /아침|식사|메뉴|먹/.test(`${position.title} ${position.focus}`))).toBe(true);
+    expect(readingPlanSchema.parse(plan)).toEqual(plan);
+
+    const invalidLegacyPlan = {
+      ...plan,
+      answerContract: {
+        ...plan.answerContract,
+        candidates: ["샌드위치", "요거트", "계란 요리"],
+      },
+    };
+    expect(readingPlanSchema.safeParse(invalidLegacyPlan).success).toBe(false);
+  });
+
+  it("uses role positions for an English open recommendation", () => {
+    const plan = designReading("Which book should I read?", false, "en");
+
+    expect(plan.answerContract).toMatchObject({ kind: "recommend_one", candidates: [] });
+    expect(plan.positions.every((position) => !/\boption$/i.test(position.title))).toBe(true);
+    expect(plan.positions.every((position) => /title|work|book/i.test(`${position.title} ${position.focus}`))).toBe(true);
+    expect(plan.selectionGuide).not.toMatch(/menu/i);
   });
 
   it("inherits prior candidates only for a referential follow-up", () => {
@@ -287,6 +326,35 @@ describe("reading design and interpretation", () => {
       });
     }
     expect(createAnswerContract("그럼 내일은 뭐 입는 게 좋을까?", context)).toMatchObject({
+      kind: "recommend_one",
+      candidates: [],
+    });
+    for (const newRecommendation of [
+      "그래서 다른 메뉴를 추천해줘",
+      "그러면 새로운 식사 추천해줘",
+      "그럼 이번엔 다른 책 추천해줘",
+    ]) {
+      expect(createAnswerContract(newRecommendation, context)).toMatchObject({
+        kind: "recommend_one",
+        candidates: [],
+      });
+    }
+  });
+
+  it("does not inherit candidates from a legacy open recommendation", () => {
+    const context = {
+      initialQuestion: "아침 뭐 먹을까?",
+      previousQuestions: [],
+      previousAnswer: "토스트를 먹어요.",
+      previousContract: {
+        kind: "recommend_one" as const,
+        subject: "아침 메뉴",
+        candidates: ["토스트", "죽", "샌드위치"],
+        decisive: true,
+      },
+    };
+
+    expect(createAnswerContract("그래서 뭐 먹어?", context)).toMatchObject({
       kind: "recommend_one",
       candidates: [],
     });

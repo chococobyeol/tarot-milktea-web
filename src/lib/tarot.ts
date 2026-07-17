@@ -315,10 +315,20 @@ function latestQuestion(question: string): string {
 function refersToPriorDecision(question: string): boolean {
   const normalized = question.trim().toLowerCase();
   const explicitReference = /결론(?:은|이)?|(?:뭐|무엇|어느)\s*(?:가|이)?\s*답|정확히.{0,12}하나만|하나만\s*(?:말|골라|정해)|둘 중|그중|어느\s*(?:쪽|걸|것)|뭘\s*(?:골라|선택|정해)|무엇으로|뭘로|(?:먹|입|고르|선택|하)라는\s*(?:거|것)|which one|so which|exactly which|between them/iu.test(normalized);
+  const introducesNewTarget = /(?:새로운|새|다른|별도(?:의|로)?|이번엔|이번에는).{0,24}(?:추천|골라|선택|정해|뭐|무엇|무슨|어떤|메뉴|식사|책|작품|영화|노래|옷|코디|장소|선물)|(?:추천|골라|선택|정해).{0,18}(?:새로운|새|다른|별도)/u.test(normalized);
+  if (introducesNewTarget) return false;
   if (explicitReference) return true;
   const startsAsContinuation = /^(?:그래서|그럼|그러면|결국)(?:\s|[,.:!?]|$)/u.test(normalized);
-  const introducesNewTarget = /(?:내일|모레|다음\s*(?:날|주|달)|새로운|다른).{0,24}(?:뭐|무엇|무슨|어떤)|(?:뭐|무엇|무슨|어떤).{0,18}(?:입|읽|살|갈|할).{0,10}(?:좋|추천)/u.test(normalized);
-  return startsAsContinuation && !introducesNewTarget;
+  const asksAboutAnotherTimeOrDomain = /(?:내일|모레|다음\s*(?:날|주|달)).{0,24}(?:뭐|무엇|무슨|어떤)|(?:뭐|무엇|무슨|어떤).{0,18}(?:입|읽|살|갈|할).{0,10}(?:좋|추천)/u.test(normalized);
+  return startsAsContinuation && !asksAboutAnotherTimeOrDomain;
+}
+
+export function isOpenRecommendationQuestion(question: string): boolean {
+  const normalized = question.trim().toLowerCase();
+  return /추천(?:해|해줘|해주세요|받|할)/iu.test(normalized)
+    || /(?:뭐|뭘|뭐를|무엇|무슨|어떤).{0,36}(?:좋을까|나을까|먹(?:을까|어|지|으라(?:는)?(?:\s*건데)?)|입(?:을까|어|지)|살까|사야|읽(?:을까|어|지)|보(?:을까|자)|볼까|봐야|듣(?:어|지|자)|들(?:을까|어|을지|으면|자)|갈까|가야|고를까|골라|선택할까|선택해|주문할까|주문해|하(?:지|자|면\s*좋|는\s*게\s*좋)|할까|해야)/iu.test(normalized)
+    || /어디(?:로|를|에)?\s*(?:갈까|가야|갈지|가면\s*좋|가자|추천)/iu.test(normalized)
+    || /recommend|(?:what|which)\s+(?:book|movie|menu|meal|outfit|option|one)?\s*should\s+i\s+(?:eat|wear|buy|read|watch|choose|pick)|what\s+should\s+i\s+(?:eat|wear|buy|read|watch)|where\s+should\s+i\s+go|pick\s+(?:for|me)/iu.test(normalized);
 }
 
 export function createAnswerContract(
@@ -332,7 +342,10 @@ export function createAnswerContract(
     context?.initialQuestion,
     ...(context?.previousQuestions ?? []),
   ].filter((value): value is string => Boolean(value));
-  const inheritedCandidates = inherited?.candidates.length && inherited.candidates.length <= 5
+  const inheritedCandidates = inherited
+    && ["choose_one", "yes_no", "compare"].includes(inherited.kind)
+    && inherited.candidates.length
+    && inherited.candidates.length <= 5
     ? [...inherited.candidates]
     : null;
   const explicitChoices = extractChoiceCandidates(current)
@@ -367,12 +380,12 @@ export function createAnswerContract(
     };
   }
   const englishOpenQuestion = /\b(?:what|how|where|when|which)\s+should\s+i\b/iu.test(normalized);
-  const asksForOpenRecommendation = /추천(?:해|해줘|해주세요|받|할)|(?:뭐|무엇|무슨|어떤).{0,28}(?:좋을까|나을까|먹을까|입을까|살까|읽을까|볼까|갈까|고를까|선택할까|주문할까|할까)|recommend|(?:what|which)\s+(?:book|movie|menu|meal|outfit|option|one)?\s*should\s+i\s+(?:eat|wear|buy|read|watch|choose|pick)|what\s+should\s+i\s+(?:eat|wear|buy|read|watch)|pick\s+(?:for|me)/iu.test(normalized);
+  const asksForOpenRecommendation = isOpenRecommendationQuestion(normalized);
   if (asksForOpenRecommendation) {
     return {
       kind: "recommend_one",
       subject: current.slice(0, 100),
-      candidates: refersToPriorDecision(current) && inherited?.candidates.length ? [...inherited.candidates] : [],
+      candidates: [],
       decisive: true,
     };
   }
@@ -518,6 +531,143 @@ const POSITION_LIBRARY_EN: Record<QuestionCategory, ReadingPosition[]> = {
   ],
 };
 
+type RecommendationDomain = "food" | "outfit" | "schedule" | "media" | "place" | "purchase" | "general";
+
+function detectRecommendationDomain(question: string): RecommendationDomain {
+  if (/아침|점심|저녁|식사|메뉴|음식|먹|간식|끼니|배달|요리|breakfast|lunch|dinner|meal|menu|food|snack|eat|cook|delivery/i.test(question)) return "food";
+  if (/옷|코디|입(?:을|고|는|지|어)|신발|겉옷|복장|outfit|clothes|wear|shoes|jacket/i.test(question)) return "outfit";
+  if (/오늘\s*(?:뭐|무엇|할\s*일)|주말\s*일정|할\s*일|일정|약속|today(?:'s)?\s*(?:task|plan)|weekend\s*(?:plan|schedule)|to-?do/i.test(question)) return "schedule";
+  if (/책|소설|만화|영화|드라마|영상|음악|노래|게임|book|novel|comic|movie|show|music|song|game/i.test(question)) return "media";
+  if (/어디|장소|여행|가볼|갈까|where|place|trip|travel|visit/i.test(question)) return "place";
+  if (/사다|살까|구매|선물|제품|buy|purchase|gift|product/i.test(question)) return "purchase";
+  return "general";
+}
+
+function recommendationPositions(
+  question: string,
+  language: ReadingLanguage,
+  cardCount: number,
+  followup: boolean,
+): ReadingPosition[] {
+  const domain = detectRecommendationDomain(question);
+  const korean: Record<RecommendationDomain, ReadingPosition[]> = {
+    food: [
+      { id: "signal", title: "메뉴의 핵심 신호", focus: "카드의 핵심 의미가 이번 식사에서 어떤 메뉴를 가리키는지 살펴봐요." },
+      { id: "caution", title: "피할 메뉴 흐름", focus: "이번 식사 메뉴를 정할 때 카드가 경고하는 선택 방식을 살펴봐요." },
+      { id: "support", title: "추천을 돕는 메뉴 신호", focus: "구체적인 식사 메뉴 하나를 정하는 데 카드가 더하는 지지를 살펴봐요." },
+      { id: "adjustment", title: "메뉴 추천의 보정", focus: "서로 다른 카드 신호를 합칠 때 메뉴 추천에서 조정할 부분을 살펴봐요." },
+      { id: "verdict", title: "최종 메뉴 단서", focus: "전체 카드 의미를 합쳐 실제로 먹을 메뉴 하나를 정할 마지막 단서를 살펴봐요." },
+    ],
+    outfit: [
+      { id: "signal", title: "옷 선택의 핵심 신호", focus: "카드의 핵심 의미가 이번 옷차림에서 어떤 선택을 가리키는지 살펴봐요." },
+      { id: "caution", title: "피할 옷 선택", focus: "이번 옷차림을 정할 때 카드가 경고하는 선택 방식을 살펴봐요." },
+      { id: "support", title: "코디를 돕는 신호", focus: "구체적인 옷차림 하나를 정하는 데 카드가 더하는 지지를 살펴봐요." },
+      { id: "adjustment", title: "옷 추천의 보정", focus: "서로 다른 카드 신호를 합칠 때 옷 추천에서 조정할 부분을 살펴봐요." },
+      { id: "verdict", title: "최종 코디 단서", focus: "전체 카드 의미를 합쳐 실제로 입을 옷차림 하나를 정할 마지막 단서를 살펴봐요." },
+    ],
+    schedule: [
+      { id: "signal", title: "할 일의 핵심 신호", focus: "카드의 핵심 의미가 이번 일정에서 어떤 일을 가리키는지 살펴봐요." },
+      { id: "caution", title: "피할 일정 흐름", focus: "이번 일정을 정할 때 카드가 경고하는 행동 방식을 살펴봐요." },
+      { id: "support", title: "실행을 돕는 일정 신호", focus: "구체적인 할 일 하나를 정하는 데 카드가 더하는 지지를 살펴봐요." },
+      { id: "adjustment", title: "일정 추천의 보정", focus: "서로 다른 카드 신호를 합칠 때 일정 추천에서 조정할 부분을 살펴봐요." },
+      { id: "verdict", title: "최종 행동 단서", focus: "전체 카드 의미를 합쳐 이번 일정에서 할 행동 하나를 정할 마지막 단서를 살펴봐요." },
+    ],
+    media: [
+      { id: "signal", title: "작품 선택 신호", focus: "카드의 핵심 의미가 어떤 작품을 고르라고 가리키는지 살펴봐요." },
+      { id: "caution", title: "피할 선택 흐름", focus: "작품을 정할 때 카드가 경고하는 선택 방식을 살펴봐요." },
+      { id: "support", title: "추천을 돕는 신호", focus: "구체적인 작품 하나를 정하는 데 카드가 더하는 지지를 살펴봐요." },
+      { id: "adjustment", title: "작품 추천의 보정", focus: "서로 다른 카드 신호를 합칠 때 추천에서 조정할 부분을 살펴봐요." },
+      { id: "verdict", title: "최종 작품 단서", focus: "전체 카드 의미를 합쳐 실제 작품 하나를 정할 마지막 단서를 살펴봐요." },
+    ],
+    place: [
+      { id: "signal", title: "장소 선택 신호", focus: "카드의 핵심 의미가 어떤 장소를 가리키는지 살펴봐요." },
+      { id: "caution", title: "피할 선택 흐름", focus: "갈 곳을 정할 때 카드가 경고하는 선택 방식을 살펴봐요." },
+      { id: "support", title: "장소 추천 신호", focus: "구체적인 장소 하나를 정하는 데 카드가 더하는 지지를 살펴봐요." },
+      { id: "adjustment", title: "장소 추천의 보정", focus: "서로 다른 카드 신호를 합칠 때 장소 추천에서 조정할 부분을 살펴봐요." },
+      { id: "verdict", title: "최종 행선지 단서", focus: "전체 카드 의미를 합쳐 실제로 갈 장소 하나를 정할 마지막 단서를 살펴봐요." },
+    ],
+    purchase: [
+      { id: "signal", title: "구매 선택 신호", focus: "카드의 핵심 의미가 어떤 구매 대상을 가리키는지 살펴봐요." },
+      { id: "caution", title: "피할 구매 흐름", focus: "구매 대상을 정할 때 카드가 경고하는 선택 방식을 살펴봐요." },
+      { id: "support", title: "구매 추천 신호", focus: "구체적인 구매 대상 하나를 정하는 데 카드가 더하는 지지를 살펴봐요." },
+      { id: "adjustment", title: "구매 추천의 보정", focus: "서로 다른 카드 신호를 합칠 때 구매 추천에서 조정할 부분을 살펴봐요." },
+      { id: "verdict", title: "최종 구매 단서", focus: "전체 카드 의미를 합쳐 실제로 고를 대상 하나를 정할 마지막 단서를 살펴봐요." },
+    ],
+    general: [
+      { id: "signal", title: "추천의 핵심 신호", focus: "카드의 핵심 의미가 질문에 맞는 어떤 구체적인 답을 가리키는지 살펴봐요." },
+      { id: "caution", title: "피할 선택 흐름", focus: "구체적인 답을 정할 때 카드가 경고하는 선택 방식을 살펴봐요." },
+      { id: "support", title: "추천을 돕는 신호", focus: "답 하나를 정하는 데 카드가 더하는 지지를 살펴봐요." },
+      { id: "adjustment", title: "추천의 보정 신호", focus: "서로 다른 카드 신호를 합칠 때 조정할 부분을 살펴봐요." },
+      { id: "verdict", title: "최종 추천 단서", focus: "전체 카드 의미를 합쳐 실행할 수 있는 답 하나를 정할 마지막 단서를 살펴봐요." },
+    ],
+  };
+  const english: Record<RecommendationDomain, ReadingPosition[]> = {
+    food: [
+      { id: "signal", title: "Core menu signal", focus: "What kind of specific meal the central card meaning points toward" },
+      { id: "caution", title: "Menu caution", focus: "A way of choosing this meal that the cards caution against" },
+      { id: "support", title: "Menu support", focus: "The signal that helps settle on one concrete meal" },
+      { id: "adjustment", title: "Menu adjustment", focus: "What to adjust when combining the card signals into a recommendation" },
+      { id: "verdict", title: "Final menu clue", focus: "The last clue for naming one specific meal after all cards are read" },
+    ],
+    outfit: [
+      { id: "signal", title: "Core outfit signal", focus: "What specific outfit direction the central card meaning points toward" },
+      { id: "caution", title: "Outfit caution", focus: "A way of choosing the outfit that the cards caution against" },
+      { id: "support", title: "Outfit support", focus: "The signal that helps settle on one concrete outfit" },
+      { id: "adjustment", title: "Outfit adjustment", focus: "What to adjust when combining the card signals into a recommendation" },
+      { id: "verdict", title: "Final outfit clue", focus: "The last clue for naming one specific outfit after all cards are read" },
+    ],
+    schedule: [
+      { id: "signal", title: "Core task signal", focus: "What specific task the central card meaning points toward" },
+      { id: "caution", title: "Schedule caution", focus: "A way of choosing the next task that the cards caution against" },
+      { id: "support", title: "Action support", focus: "The signal that helps settle on one concrete action" },
+      { id: "adjustment", title: "Schedule adjustment", focus: "What to adjust when combining the card signals into a recommendation" },
+      { id: "verdict", title: "Final action clue", focus: "The last clue for naming one specific action after all cards are read" },
+    ],
+    media: [
+      { id: "signal", title: "Core title signal", focus: "What specific work the central card meaning points toward" },
+      { id: "caution", title: "Choice caution", focus: "A way of choosing the work that the cards caution against" },
+      { id: "support", title: "Recommendation support", focus: "The signal that helps settle on one concrete work" },
+      { id: "adjustment", title: "Recommendation adjustment", focus: "What to adjust when combining the card signals into a recommendation" },
+      { id: "verdict", title: "Final title clue", focus: "The last clue for naming one specific work after all cards are read" },
+    ],
+    place: [
+      { id: "signal", title: "Core place signal", focus: "What specific place the central card meaning points toward" },
+      { id: "caution", title: "Place caution", focus: "A way of choosing the destination that the cards caution against" },
+      { id: "support", title: "Place support", focus: "The signal that helps settle on one concrete place" },
+      { id: "adjustment", title: "Place adjustment", focus: "What to adjust when combining the card signals into a recommendation" },
+      { id: "verdict", title: "Final destination clue", focus: "The last clue for naming one specific destination after all cards are read" },
+    ],
+    purchase: [
+      { id: "signal", title: "Core purchase signal", focus: "What specific item the central card meaning points toward" },
+      { id: "caution", title: "Purchase caution", focus: "A way of choosing the purchase that the cards caution against" },
+      { id: "support", title: "Purchase support", focus: "The signal that helps settle on one concrete item" },
+      { id: "adjustment", title: "Purchase adjustment", focus: "What to adjust when combining the card signals into a recommendation" },
+      { id: "verdict", title: "Final purchase clue", focus: "The last clue for naming one specific item after all cards are read" },
+    ],
+    general: [
+      { id: "signal", title: "Core recommendation signal", focus: "What specific answer the central card meaning points toward" },
+      { id: "caution", title: "Choice caution", focus: "A way of choosing that the cards caution against" },
+      { id: "support", title: "Recommendation support", focus: "The signal that helps settle on one concrete answer" },
+      { id: "adjustment", title: "Recommendation adjustment", focus: "What to adjust when combining the card signals into a recommendation" },
+      { id: "verdict", title: "Final recommendation clue", focus: "The last clue for naming one actionable answer after all cards are read" },
+    ],
+  };
+  const indices = cardCount === 1
+    ? [4]
+    : cardCount === 2
+      ? [0, 4]
+      : cardCount === 3
+        ? [0, 1, 4]
+        : cardCount === 4
+          ? [0, 1, 2, 4]
+          : [0, 1, 2, 3, 4];
+  const source = (language === "ko" ? korean : english)[domain];
+  return indices.map((index, positionIndex) => ({
+    ...source[index],
+    id: `${followup ? "followup" : "initial"}-${positionIndex + 1}-recommend-${source[index].id}`,
+  }));
+}
+
 export function designReading(
   question: string,
   followup = false,
@@ -526,7 +676,7 @@ export function designReading(
 ): ReadingPlan {
   const category = detectQuestionCategory(question);
   const answerContract = createAnswerContract(question, context, language);
-  const candidateMode = ["choose_one", "recommend_one", "yes_no", "compare"].includes(answerContract.kind);
+  const candidateMode = ["choose_one", "yes_no", "compare"].includes(answerContract.kind);
   if (candidateMode && answerContract.candidates.length >= 2) {
     const positions = answerContract.candidates.slice(0, 5).map((candidate, index) => ({
       id: `${followup ? "followup" : "initial"}-${index + 1}-option`,
@@ -552,10 +702,12 @@ export function designReading(
     };
   }
   const cardCount = requestedCardCount(question, followup);
-  const positions = (language === "ko" ? POSITION_LIBRARY : POSITION_LIBRARY_EN)[category].slice(0, cardCount).map((position, index) => ({
-    ...position,
-    id: `${followup ? "followup" : "initial"}-${index + 1}-${position.id}`,
-  }));
+  const positions = answerContract.kind === "recommend_one"
+    ? recommendationPositions(question, language, cardCount, followup)
+    : (language === "ko" ? POSITION_LIBRARY : POSITION_LIBRARY_EN)[category].slice(0, cardCount).map((position, index) => ({
+      ...position,
+      id: `${followup ? "followup" : "initial"}-${index + 1}-${position.id}`,
+    }));
 
   const categoryFrame = (language === "ko" ? {
     relationship: "관계의 상호작용과 조정 가능성을 중심으로",
@@ -569,10 +721,42 @@ export function designReading(
     self: "Focusing on the current state, causes, and possible adjustment",
   })[category];
 
+  const recommendationDomain = detectRecommendationDomain(question);
+  const recommendationSubject = language === "ko"
+    ? ({
+      food: "식사 메뉴",
+      outfit: "옷차림",
+      schedule: "일정",
+      media: "작품",
+      place: "장소",
+      purchase: "구매 대상",
+      general: "질문의 대상",
+    } as const)[recommendationDomain]
+    : ({
+      food: "meal",
+      outfit: "outfit",
+      schedule: "schedule",
+      media: "title",
+      place: "destination",
+      purchase: "purchase",
+      general: "answer",
+    } as const)[recommendationDomain];
+
+  const recommendationFrame = language === "ko"
+    ? `후보를 미리 정하지 않고 ${cardCount}장의 카드 신호로 ${recommendationSubject}를 읽은 뒤 구체적인 답 하나를 정해요.`
+    : `Read ${cardCount} card signal${cardCount === 1 ? "" : "s"} for the ${recommendationSubject} without preselecting candidates, then name one concrete answer.`;
+  const recommendationGuide = language === "ko"
+    ? `아래 카드 중 ${cardCount}장을 선택해요. 구체적인 ${recommendationSubject}는 카드를 공개한 뒤 정해요.`
+    : `Select ${cardCount} card${cardCount === 1 ? "" : "s"}. The recommendation is named only after the cards are revealed.`;
+
   return {
     cardCount,
-    interpretationFrame: language === "ko" ? `${categoryFrame} ${cardCount}장의 카드를 분석해요.` : `${categoryFrame}, using ${cardCount} card${cardCount === 1 ? "" : "s"}.`,
-    selectionGuide: language === "ko" ? `아래 카드 중 ${cardCount}장을 선택해요. 선택 순서대로 각 자리에 배치돼요.` : `Select ${cardCount} card${cardCount === 1 ? "" : "s"} below. Cards are assigned by selection order.`,
+    interpretationFrame: answerContract.kind === "recommend_one"
+      ? recommendationFrame
+      : language === "ko" ? `${categoryFrame} ${cardCount}장의 카드를 분석해요.` : `${categoryFrame}, using ${cardCount} card${cardCount === 1 ? "" : "s"}.`,
+    selectionGuide: answerContract.kind === "recommend_one"
+      ? recommendationGuide
+      : language === "ko" ? `아래 카드 중 ${cardCount}장을 선택해요. 선택 순서대로 각 자리에 배치돼요.` : `Select ${cardCount} card${cardCount === 1 ? "" : "s"} below. Cards are assigned by selection order.`,
     positions,
     answerContract,
   };
@@ -824,7 +1008,7 @@ export function generateReadingResult(
     : selectedCards;
   const contract = answerContract ?? createAnswerContract(question, undefined, language);
   if (
-    ["choose_one", "recommend_one", "yes_no", "compare"].includes(contract.kind)
+    ["choose_one", "yes_no", "compare"].includes(contract.kind)
     && contract.candidates.length >= 2
   ) {
     return generateCandidateResult(question, contract, latestCards, language);

@@ -1,15 +1,36 @@
 import { describe, expect, it } from "vitest";
 
-import { stabilizeAnswerContractReading } from "@/app/api/tarot/route";
+import { canUsePlanFallback, stabilizeAnswerContractReading } from "@/app/api/tarot/route";
 import { enforceReadingQuality, type ExpectedInterpretation } from "@/src/lib/reading-quality";
 import { readingResultSchema } from "@/src/lib/schemas";
 import type { AnswerContract, ReadingResult } from "@/src/lib/tarot";
+import { ApiError } from "@/src/server/security";
 
 describe("candidate answer stabilization", () => {
+  it("does not lead an open recommendation into card selection when AI is unavailable", () => {
+    const openRecommendation: AnswerContract = {
+      kind: "recommend_one",
+      subject: "오늘 먹을 메뉴 하나",
+      candidates: [],
+      decisive: true,
+    };
+    expect(canUsePlanFallback(openRecommendation)).toBe(false);
+    expect(canUsePlanFallback(openRecommendation, new ApiError(503, "DAILY_AI_LIMIT", "limit"))).toBe(false);
+    expect(canUsePlanFallback(openRecommendation, new ApiError(502, "INVALID_AI_RESPONSE", "invalid"))).toBe(true);
+
+    const suppliedChoice: AnswerContract = {
+      kind: "choose_one",
+      subject: "두 메뉴 중 하나",
+      candidates: ["김치찌개", "애호박찌개"],
+      decisive: true,
+    };
+    expect(canUsePlanFallback(suppliedChoice)).toBe(true);
+  });
+
   it("repairs direct-answer placement without replacing the AI reading", () => {
     const answerContract: AnswerContract = {
-      kind: "recommend_one",
-      subject: "아침 식사 메뉴",
+      kind: "choose_one",
+      subject: "제시된 아침 식사 메뉴 중 하나",
       candidates: ["토스트", "계란볶음밥", "과일 요거트"],
       decisive: true,
     };
@@ -50,7 +71,7 @@ describe("candidate answer stabilization", () => {
     ];
     const unsafeAiResult: ReadingResult = {
       verdict: {
-        kind: "recommend_one",
+        kind: "choose_one",
         value: "과일 요거트",
         statement: "아침 식사 메뉴로 과일 요거트를 추천해요.",
       },
@@ -87,7 +108,7 @@ describe("candidate answer stabilization", () => {
     expect(JSON.stringify(stabilized)).toMatch(/더 편안한 식사|실제 준비 상태|더 만족스러운 결과|토스트는 복잡/);
     expect(stabilized.signals.support + stabilized.signals.caution + stabilized.signals.uncertainty).toBe(100);
     expect(() => enforceReadingQuality(stabilized, {
-      question: "아침 뭐 먹을까?",
+      question: "토스트, 계란볶음밥, 과일 요거트 중 아침 메뉴 하나를 골라줘",
       language: "ko",
       sourceSentences: [],
       expectedCards,

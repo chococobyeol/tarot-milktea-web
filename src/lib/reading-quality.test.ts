@@ -178,7 +178,7 @@ describe("enforceReadingQuality", () => {
       previousContract: {
         kind: "recommend_one" as const,
         subject: "아침 메뉴",
-        candidates: ["토스트", "죽", "샌드위치"],
+        candidates: [],
         decisive: true,
       },
     };
@@ -188,19 +188,19 @@ describe("enforceReadingQuality", () => {
     expect(resolveEverydayDomain("그 사람의 속마음은 어때?", foodContext)).toBeNull();
   });
 
-  it("normalizes candidate positions without replacing the AI semantic intent", () => {
+  it("keeps open recommendations role-based and rejects preselected candidates", () => {
     const plan = enforcePlanQuality({
       cardCount: 2,
-      interpretationFrame: "아침 식사를 살펴봐요.",
-      selectionGuide: "카드를 골라요.",
+      interpretationFrame: "카드 신호로 아침 메뉴 하나를 정해요.",
+      selectionGuide: "카드 두 장을 골라요.",
       positions: [
-        { id: "a", title: "후보 A", focus: "첫 후보" },
-        { id: "b", title: "후보 B", focus: "둘째 후보" },
+        { id: "signal", title: "메뉴의 핵심 신호", focus: "아침 식사 메뉴를 정할 카드의 핵심 신호" },
+        { id: "verdict", title: "최종 메뉴 단서", focus: "카드 전체로 아침 메뉴 하나를 정할 마지막 단서" },
       ],
       answerContract: {
-        kind: "choose_one",
+        kind: "recommend_one",
         subject: "아침 메뉴",
-        candidates: ["계란말이", "토스트", "샌드위치"],
+        candidates: [],
         decisive: true,
       },
     }, {
@@ -208,9 +208,37 @@ describe("enforceReadingQuality", () => {
       language: "ko",
     });
 
-    expect(plan.answerContract.kind).toBe("recommend_one");
-    expect(plan.cardCount).toBe(3);
-    expect(plan.positions.map((position) => position.title)).toEqual(["계란말이 선택", "토스트 선택", "샌드위치 선택"]);
+    expect(plan.answerContract).toMatchObject({ kind: "recommend_one", candidates: [], decisive: true });
+    expect(plan.cardCount).toBe(2);
+    expect(plan.positions.map((position) => position.title)).toEqual(["메뉴의 핵심 신호", "최종 메뉴 단서"]);
+
+    expect(() => enforcePlanQuality({
+      ...plan,
+      interpretationFrame: "아침 메뉴 후보인 샌드위치와 요거트를 비교해요.",
+      selectionGuide: "샌드위치와 요거트에 놓을 카드를 골라요.",
+    }, {
+      question: "아침 뭐 먹을까?",
+      language: "ko",
+    })).toThrow(/구성 문구 전체/);
+
+    expect(() => enforcePlanQuality({
+      ...plan,
+      cardCount: 3,
+      positions: [
+        { id: "egg", title: "계란말이 선택", focus: "아침 메뉴 후보" },
+        { id: "toast", title: "토스트 선택", focus: "아침 메뉴 후보" },
+        { id: "sandwich", title: "샌드위치 선택", focus: "아침 메뉴 후보" },
+      ],
+      answerContract: {
+        kind: "recommend_one",
+        subject: "아침 메뉴",
+        candidates: ["계란말이", "토스트", "샌드위치"],
+        decisive: true,
+      },
+    }, {
+      question: "아침 뭐 먹을까?",
+      language: "ko",
+    })).toThrow(/카드 공개 전에 후보/);
 
     const explanationPlan = enforcePlanQuality({
       cardCount: 2,
@@ -252,6 +280,42 @@ describe("enforceReadingQuality", () => {
       question: "아침 뭐 먹을까?",
       language: "ko",
     })).toThrow(/답변 유형은 recommend_one/);
+  });
+
+  it("does not force old explicit candidates onto a new open recommendation", () => {
+    const previousContract = {
+      kind: "choose_one" as const,
+      subject: "두 메뉴 중 최종 선택",
+      candidates: ["김치찌개", "애호박찌개"],
+      decisive: true,
+    };
+    const plan = enforcePlanQuality({
+      cardCount: 2,
+      interpretationFrame: "새 식사 메뉴를 카드 공개 뒤 하나 정해요.",
+      selectionGuide: "메뉴 역할 카드 두 장을 골라요.",
+      positions: [
+        { id: "new-signal", title: "새 메뉴 신호", focus: "새로운 식사 메뉴를 가리키는 카드 신호" },
+        { id: "new-verdict", title: "최종 메뉴 단서", focus: "새로운 식사 메뉴 하나를 정할 마지막 단서" },
+      ],
+      answerContract: {
+        kind: "recommend_one",
+        subject: "다른 메뉴 추천",
+        candidates: [],
+        decisive: true,
+      },
+    }, {
+      question: "그래서 다른 메뉴를 추천해줘",
+      language: "ko",
+      conversation: {
+        initialQuestion: "김치찌개와 애호박찌개 중 골라줘",
+        previousQuestions: [],
+        previousAnswer: "김치찌개를 골라요.",
+        previousContract,
+      },
+    });
+
+    expect(plan.answerContract).toMatchObject({ kind: "recommend_one", candidates: [] });
+    expect(plan.positions.map((position) => position.title)).toEqual(["새 메뉴 신호", "최종 메뉴 단서"]);
   });
 
   it("does not turn phrases inside an explicit cause question into choices", () => {
@@ -381,36 +445,41 @@ describe("enforceReadingQuality", () => {
     const answerContract = {
       kind: "recommend_one" as const,
       subject: "오늘 먹을 메뉴 하나",
-      candidates: ["김치찌개", "비빔밥", "우동"],
+      candidates: [],
       decisive: true,
     };
     const result: ReadingResult = {
-      ...baseResult,
       verdict: {
         kind: "recommend_one",
         value: "김치찌개",
-        statement: "이번 카드 배열에서는 김치찌개를 먹어요.",
+        statement: "오늘 아침 메뉴는 김치찌개예요.",
       },
-      summary: "이번 카드 배열에서는 김치찌개를 먹어요. 세 후보의 카드 신호 중 김치찌개 쪽이 가장 강해요.",
-      synthesis: "전차 카드는 김치찌개 선택에 지지 신호를 더해요. 펜타클 왕 카드는 비빔밥 선택의 카드 신호를 보여줘요. 완드 9 카드는 우동 선택에 주의 신호를 더해요.",
-      guidance: ["오늘 메뉴는 김치찌개로 정해요.", "실제로 먹을 수 없는 사정이 있을 때만 바꿔요."],
-      cardInterpretations: baseResult.cardInterpretations.map((item, index) => {
-        const candidate = answerContract.candidates[index];
-        return {
-          ...item,
-          text: `${candidate} 선택에 나온 카드 신호를 비교해요.`,
-          reasoning: {
-            ...item.reasoning!,
-            questionConnection: `${item.positionTitle} 자리에서는 ${candidate} 선택에 카드 원뜻이 주는 신호를 다른 후보와 비교해요.`,
-            decisionImpact: `${candidate} 자체의 실제 속성이 아니라 이 카드가 선택 판단에 더하는 지지와 주의만 반영해요.`,
-          },
-        };
-      }),
+      summary: "오늘 아침 메뉴는 김치찌개예요. 카드의 추진과 점검 신호를 합쳐 한 메뉴를 직접 추천해요.",
+      synthesis: "전차 카드는 아침 메뉴를 오래 열어 두지 않고 김치찌개로 정하는 데 지지를 더해요. 펜타클 왕 카드는 실제로 먹을 수 있는지 확인한 뒤 메뉴 결정을 유지하는 데 무게를 둬요. 완드 9 카드는 다른 대안을 다시 늘리지 말고 정한 식사를 실행하라는 근거가 돼요.",
+      guidance: ["오늘 아침에는 김치찌개를 먹어요.", "실제로 준비하거나 주문할 수 있는지만 확인해요."],
+      cardInterpretations: baseResult.cardInterpretations.map((item, index) => ({
+        ...item,
+        positionTitle: ["메뉴의 핵심 신호", "메뉴 추천의 보정", "최종 메뉴 단서"][index],
+        text: [
+          "아침 메뉴 하나를 바로 정하는 신호가 나와요.",
+          "정한 메뉴를 실제로 먹을 수 있는지만 확인해요.",
+          "카드 전체는 김치찌개라는 한 메뉴로 결론을 모아요.",
+        ][index],
+        reasoning: {
+          ...item.reasoning!,
+          questionConnection: `${["메뉴의 핵심 신호", "메뉴 추천의 보정", "최종 메뉴 단서"][index]} 자리에서는 카드 원뜻을 오늘 아침에 먹을 메뉴 하나를 정하는 신호로 연결해요.`,
+          decisionImpact: index === 2
+            ? "이 카드 신호가 김치찌개를 오늘 아침 메뉴로 답하는 데 지지를 더해요."
+            : "이 카드 신호는 메뉴 후보를 다시 늘리기보다 한 가지 식사를 정하는 쪽에 무게를 둬요.",
+        },
+      })),
       axes: [
-        { label: "김치찌개 신호", score: 72, evidence: "김치찌개 후보의 카드 신호예요.", evidenceCardIds: ["major-07"] },
-        { label: "비빔밥 신호", score: 58, evidence: "비빔밥 후보의 카드 신호예요.", evidenceCardIds: ["pentacles-king"] },
-        { label: "우동 신호", score: 44, evidence: "우동 후보의 카드 신호예요.", evidenceCardIds: ["wands-09"] },
+        { label: "메뉴 결정 신호", score: 72, evidence: "한 가지 아침 메뉴를 정하는 카드 신호예요.", evidenceCardIds: ["major-07"] },
+        { label: "준비 확인", score: 58, evidence: "식사를 준비할 수 있는지 직접 확인해요.", evidenceCardIds: ["pentacles-king"] },
+        { label: "선택 유지", score: 64, evidence: "정한 메뉴를 다시 열지 않는 신호예요.", evidenceCardIds: ["wands-09"] },
       ],
+      signals: { support: 61, caution: 22, uncertainty: 17 },
+      limitation: "이 추천은 카드 상징을 메뉴 선택에 적용한 해석이며 실제 맛이나 영양을 예측하지 않아요.",
     };
 
     expect(enforceReadingQuality(result, {
@@ -419,6 +488,29 @@ describe("enforceReadingQuality", () => {
       sourceSentences: [],
       answerContract,
     })).toBe(result);
+
+    const symbolicFlavorRecommendation: ReadingResult = {
+      ...result,
+      synthesis: `${result.synthesis} 카드 상징은 자극적인 맛의 김치찌개 쪽으로 추천을 구체화해요.`,
+      guidance: ["오늘 아침에는 김치찌개를 먹어요.", "원한다면 간은 직접 조절해요."],
+    };
+    expect(enforceReadingQuality(symbolicFlavorRecommendation, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toBe(symbolicFlavorRecommendation);
+
+    const inventedNutritionRecommendation: ReadingResult = {
+      ...result,
+      guidance: ["오늘 아침에는 김치찌개를 먹어요.", "단백질과 활동량에 맞는 메뉴예요."],
+    };
+    expect(() => enforceReadingQuality(inventedNutritionRecommendation, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/질문에 없는 음식 특성/);
 
     const inventedCandidateFact: ReadingResult = {
       ...result,
@@ -429,21 +521,21 @@ describe("enforceReadingQuality", () => {
       language: "ko",
       sourceSentences: [],
       answerContract,
-    })).toThrow(/제공되지 않은 현실 특성/);
+    })).toThrow(/친숙함·새로움/);
 
     expect(() => enforceReadingQuality(inventedCandidateFact, {
       question: "김치찌개, 비빔밥, 우동 중 하나 골라줘",
       language: "ko",
       sourceSentences: [],
       answerContract,
-    })).toThrow(/제공되지 않은 현실 특성/);
+    })).toThrow(/친숙함·새로움/);
   });
 
   it("rejects criteria-only, out-of-contract, and multi-answer recommendations", () => {
     const answerContract = {
       kind: "recommend_one" as const,
       subject: "오늘 먹을 메뉴 하나",
-      candidates: ["김치찌개", "비빔밥", "우동"],
+      candidates: [],
       decisive: true,
     };
     const criteriaOnly: ReadingResult = {
@@ -457,18 +549,50 @@ describe("enforceReadingQuality", () => {
       answerContract,
     })).toThrow(/직접 답/);
 
-    const outsideCandidate: ReadingResult = {
+    const genericAnswer: ReadingResult = {
       ...baseResult,
-      verdict: { kind: "recommend_one", value: "샌드위치", statement: "샌드위치를 먹어요." },
-      summary: "샌드위치를 먹어요. 카드 신호가 이 선택을 지지해요.",
-      guidance: ["샌드위치를 먹어요."],
+      verdict: { kind: "recommend_one", value: "메뉴", statement: "오늘 먹을 답은 메뉴예요." },
+      summary: "오늘 먹을 답은 메뉴예요. 카드 신호를 확인해요.",
+      guidance: ["메뉴를 확인해요."],
     };
-    expect(() => enforceReadingQuality(outsideCandidate, {
+    expect(() => enforceReadingQuality(genericAnswer, {
       question: "오늘 뭐 먹을까?",
       language: "ko",
       sourceSentences: [],
       answerContract,
-    })).toThrow(/후보 중 정확히 하나/);
+    })).toThrow(/구체적인 답/);
+
+    for (const vagueCategory of ["따뜻한 국물 요리", "간단한 한식", "가벼운 아침"]) {
+      const categoryOnly: ReadingResult = {
+        ...baseResult,
+        verdict: { kind: "recommend_one", value: vagueCategory, statement: `오늘 메뉴는 ${vagueCategory}예요.` },
+        summary: `오늘 메뉴는 ${vagueCategory}예요. 카드 신호를 반영한 추천이에요.`,
+        guidance: [`오늘은 ${vagueCategory}을 선택해요.`],
+      };
+      expect(() => enforceReadingQuality(categoryOnly, {
+        question: "오늘 뭐 먹을까?",
+        language: "ko",
+        sourceSentences: [],
+        answerContract,
+      })).toThrow(/구체적인 답/);
+    }
+
+    const describedInsteadOfNamed: ReadingResult = {
+      ...baseResult,
+      verdict: {
+        kind: "recommend_one",
+        value: "평소에 자주 먹지 않았던 새로운 종류의 샌드위치",
+        statement: "오늘 메뉴는 평소에 자주 먹지 않았던 새로운 종류의 샌드위치예요.",
+      },
+      summary: "오늘 메뉴는 평소에 자주 먹지 않았던 새로운 종류의 샌드위치예요. 카드 신호를 반영한 추천이에요.",
+      guidance: ["평소에 자주 먹지 않았던 새로운 종류의 샌드위치를 먹어요."],
+    };
+    expect(() => enforceReadingQuality(describedInsteadOfNamed, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/짧은 대상·행동 이름/);
 
     const multipleAnswers: ReadingResult = {
       ...baseResult,
@@ -482,6 +606,32 @@ describe("enforceReadingQuality", () => {
       sourceSentences: [],
       answerContract,
     })).toThrow(/미루지|하나만/);
+
+    const missingGuidance: ReadingResult = {
+      ...baseResult,
+      verdict: { kind: "recommend_one", value: "샌드위치", statement: "오늘 메뉴는 샌드위치예요." },
+      summary: "오늘 메뉴는 샌드위치예요. 카드 신호를 반영한 추천이에요.",
+      guidance: ["먹을 수 있는지만 확인해요."],
+    };
+    expect(() => enforceReadingQuality(missingGuidance, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/guidance/);
+
+    const reopenedAlternative: ReadingResult = {
+      ...baseResult,
+      verdict: { kind: "recommend_one", value: "김치찌개", statement: "오늘 메뉴는 김치찌개예요." },
+      summary: "오늘 메뉴는 김치찌개예요. 카드 신호를 반영한 추천이에요.",
+      guidance: ["김치찌개를 먹어요. 아니면 비빔밥도 괜찮아요."],
+    };
+    expect(() => enforceReadingQuality(reopenedAlternative, {
+      question: "오늘 뭐 먹을까?",
+      language: "ko",
+      sourceSentences: [],
+      answerContract,
+    })).toThrow(/다른 대안/);
   });
 
   it("rejects a generic non-candidate verdict that could answer any question", () => {

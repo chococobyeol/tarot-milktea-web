@@ -74,7 +74,7 @@ const SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 엔진이다.
 - 의료·법률·금융 전문 판단을 대신하지 않는다.
 - 제공된 카드 의미 데이터의 범위를 벗어난 의미를 확정적으로 추가하지 않는다.
 - 카드 상징은 사용자의 판단 방식과 주의점을 해석할 뿐, 음식의 포만감·영양, 날씨, 건강처럼 측정 가능한 현실 속성을 예측하지 못한다. 이런 자리에서는 속성을 단정하지 말고 사용자가 확인할 현실 정보와 판단상의 주의점을 구분한다.
-- 추천 요청에서는 질문에 맞는 구체적인 후보를 새로 제안할 수 있다. 다만 그 후보의 맛·영양·효과·가격·상대 감정처럼 확인되지 않은 현실 속성을 추천 근거로 만들어내지 않는다.
+- 열린 추천 요청에서는 카드 공개 전 후보를 만들거나 범위를 임의로 좁히지 않는다. 모든 카드를 해석한 뒤 질문에 맞는 구체적인 답 하나를 처음 제안하되, 그 답의 맛·영양·효과·가격·상대 감정처럼 확인되지 않은 현실 속성을 추천 근거로 만들어내지 않는다.
 - 반드시 JSON 객체만 출력한다.`;
 
 function extractResponseText(result: unknown): string {
@@ -398,7 +398,7 @@ export async function createAiPlan(
 먼저 주제가 아니라 사용자가 요구한 답의 형태를 answerContract로 정한다.
 문장 안에 다른 질문 표현이 들어 있어도 문장 전체에서 사용자가 최종적으로 요구한 행위를 기준으로 정한다. 어떤 선택을 계속 고민하는 이유를 묻는 문장은 선택 요청이 아니라 explain이다.
 - choose_one: 사용자가 제시한 후보 중 하나를 골라 달라는 요청. candidates에는 질문의 후보를 철자 그대로 2~5개 넣고 decisive=true.
-- recommend_one: 정해진 후보 없이 구체적인 대상이나 행동 하나를 추천해 달라는 요청. 질문의 제약 안에서 실제로 답이 될 수 있는 구체적 후보 3~5개를 candidates에 짧은 이름으로 만들고 decisive=true. "종류", "범주", "적당한 것" 같은 상위 개념이 아니라 이름만 보고 그대로 선택·실행할 수 있는 특정 항목이나 행동을 쓴다. 후보의 효과나 객관적 속성을 지어내지 않는다.
+- recommend_one: 정해진 후보 없이 구체적인 대상이나 행동 하나를 추천해 달라는 요청. candidates는 반드시 빈 배열이고 decisive=true다. 카드 공개 전에는 내부적으로도 후보 목록을 만들지 않는다. 카드를 모두 해석한 뒤에만 질문의 제약 안에서 구체적인 답 하나를 생성한다.
 - yes_no: 해야 하는지, 가능한지처럼 예/아니요 방향을 요청. 출력 언어의 예/아니요 후보 2개와 decisive=true.
 - compare: 후보의 차이만 비교하고 선택까지 요구하지 않는 질문. 질문에 나온 후보를 candidates에 넣고 decisive=false.
 - forecast: 시기, 가능성, 향후 흐름을 묻는 질문.
@@ -406,11 +406,13 @@ export async function createAiPlan(
 - explain: 이유나 원인을 묻는 질문이며 decisive=false.
 - analysis: 위 유형이 아닌 상태·관계·의미 분석 질문이며 decisive=false.
 decisive는 choose_one, recommend_one, yes_no, advice에서만 true이고 compare, forecast, explain, analysis에서는 false이다.
-후속 질문이 "그래서", "결국", "정확히", "어느 쪽"처럼 앞선 결론을 가리키면 대화 맥락의 previousContract와 원 질문을 이어서 해석한다. 새 대상을 묻는 질문이면 이전 후보를 상속하지 않는다.
+후속 질문이 "그래서", "결국", "정확히", "어느 쪽"처럼 앞선 결론을 가리키면 대화 맥락의 previousContract와 원 질문을 이어서 해석한다. 사용자가 직접 제시한 후보만 이어받을 수 있으며, recommend_one에는 이전 후보를 상속하지 않는다. 새 대상을 묻는 질문이면 이전 후보를 상속하지 않는다.
 answerContract.subject에는 지금 답해야 할 대상을 현재 질문의 핵심 명사를 직접 사용해 한 문장으로 적고, candidates가 필요 없는 유형은 빈 배열을 쓴다.
 
 카드 수는 질문의 범위에 따라 1~5장이다. 기본 권장 수는 ${localPlan.cardCount}장이지만 질문을 읽고 조정할 수 있다.
-choose_one, recommend_one, yes_no, compare는 후보마다 카드 한 장을 배정하므로 cardCount와 positions 길이를 candidates 길이와 같게 한다. 각 position의 title 또는 focus에 해당 후보 이름을 철자 그대로 넣는다.
+choose_one, yes_no, compare는 후보마다 카드 한 장을 배정하므로 cardCount와 positions 길이를 candidates 길이와 같게 한다. 각 position의 title 또는 focus에 해당 후보 이름을 철자 그대로 넣는다.
+recommend_one은 후보별 자리를 만들지 않는다. 질문에 맞는 해석 역할 1~5개를 만들고, 짧은 일상 추천에는 보통 2~3장을 사용한다. 각 title은 짧고 서로 다른 역할이어야 하며, 질문의 핵심 대상이나 행동을 직접 포함한다. "샌드위치 선택", "요거트 선택"처럼 카드 공개 전 구체 후보를 position에 넣지 않는다. interpretationFrame과 selectionGuide에도 후보 이름을 쓰지 않는다.
+한국어 title은 전체 질문을 반복하지 않는 4~12자의 자연스러운 UI 라벨로 쓴다. "아침 식사 선택의 행동", "메뉴의 특징"처럼 설문 항목 같은 표현을 피하고, 질문에 맞춰 "메뉴 신호", "주의할 흐름", "최종 메뉴 단서"처럼 역할이 바로 읽히게 쓴다. 이 예시를 고정 복사하지 말고 질문마다 필요한 역할을 정한다.
 자리 역할은 질문에 실제로 답하는 구체적인 비교 기준으로 작성한다. title마다 현재 질문의 핵심 명사나 행동을 직접 넣는다. "방향성", "외부 조건", "실행 가능성", "현재 상황", "현재 상태", "핵심 기준", "선택 기준", "조정 방향"처럼 어느 질문에나 붙일 수 있는 제목은 사용하지 않는다.
 짧은 일상 질문에서는 질문에 실제로 나온 대상과 행동을 중심으로 쓴다. 질문에 없는 현실 속성을 새 비교 기준으로 만들지 않는다.
 응답 JSON 스키마:
@@ -419,8 +421,11 @@ choose_one, recommend_one, yes_no, compare는 후보마다 카드 한 장을 배
   "interpretationFrame": "이번 리딩이 분석할 기준",
   "selectionGuide": "카드 선택 안내 한 문장",
   "positions": [{ "id": "고유 영문 ID", "title": "자리 이름", "focus": "이 자리가 살펴볼 관점" }],
-  "answerContract": { "kind": "choose_one|recommend_one|yes_no|compare|forecast|advice|explain|analysis", "subject": "직접 답할 대상", "candidates": ["후보"], "decisive": true }
+  "answerContract": { "kind": "choose_one|recommend_one|yes_no|compare|forecast|advice|explain|analysis", "subject": "직접 답할 대상", "candidates": [], "decisive": true }
 }
+answerContract 예시:
+- 열린 추천: { "kind": "recommend_one", "subject": "오늘 먹을 메뉴 하나", "candidates": [], "decisive": true }
+- 사용자가 "김치찌개와 애호박찌개 중 골라줘"라고 한 명시 선택: { "kind": "choose_one", "subject": "두 메뉴 중 최종 선택", "candidates": ["김치찌개", "애호박찌개"], "decisive": true }
 positions 길이는 cardCount와 같아야 한다.
 interpretationFrame은 자리 이름을 다시 나열하지 말고, 이번 리딩에서 무엇을 판단할지 한 문장으로 쓴다.`;
   const provider = createReadingAiProvider(ai, groqApiKey, GROQ_PLAN_MODEL, 900, false);
@@ -552,13 +557,18 @@ export async function createAiInterpretation(
 - verdict.kind는 answerContract.kind와 같아야 한다.
 - verdict.value에는 질문에 대한 실제 답만 짧게 쓴다. 판단 기준, 질문 재진술, "적당한 것", "상황에 맞는 선택" 같은 범주 표현을 답으로 쓰지 않는다.
 - verdict.statement는 verdict.value를 포함한 완결된 직접 답변 한 문장이다. answerContract.subject 또는 현재 질문의 핵심 대상을 문장 안에 직접 밝혀, 다른 질문에도 그대로 붙일 수 있거나 엉뚱한 답이 되지 않게 한다. summary는 이 문장으로 시작한 뒤 카드 근거와 한계를 설명한다.
-- choose_one, recommend_one, yes_no에서는 candidates 중 정확히 하나를 verdict.value로 고른다. 둘 이상을 합치거나 후보 밖 답을 만들지 않는다.
+- choose_one과 yes_no에서는 candidates 중 정확히 하나를 verdict.value로 고른다. 둘 이상을 합치거나 후보 밖 답을 만들지 않는다.
+- recommend_one에서는 candidates가 비어 있다. 모든 카드의 역할과 의미를 해석한 뒤, 질문만으로는 정해지지 않았던 구체적인 대상이나 행동 하나를 verdict.value로 새로 만든다. 범주나 판단 기준이 아니라 사용자가 그대로 선택·실행할 수 있는 이름을 답하고, 둘 이상의 대안을 함께 말하지 않는다. verdict.value는 "샌드위치", "김치찌개", "검은 셔츠"처럼 설명절이나 조건을 떼어 낸 짧은 이름만 쓰고, 한국어 기준 28자를 넘기지 않는다.
+- 식사 recommend_one에서 메뉴 이름이나 카드 상징에 맞춘 맛·형태를 제안하는 것은 허용된다. 다만 사용자의 실제 취향·건강·포만감·영양 상태를 카드가 알아냈다고 쓰거나, 그 속성을 객관적 사실처럼 추천 근거로 단정하지 않는다. 질문에 직접 나오지 않았다면 단백질·탄수화물·칼로리·활동량·과식 같은 건강·영양·신체 추정 표현은 출력 전체에서 사용하지 않는다.
+- 질문에 없는 "익숙한/새로운"은 사용자의 실제 경험을 안다는 뜻으로 쓰지 않는다. 카드 상징의 방향을 설명할 필요가 있을 때만 쓰고, 친숙하거나 새롭기 때문에 객관적으로 더 좋다고 주장하지 않는다.
+- 질문에 사용자가 직접 말하지 않았다면 "평소에 자주 먹던", "늘 하던", "시도하지 않았던"처럼 사용자의 과거 행동이나 경험을 안다고 쓰지 않는다.
 - compare는 핵심 차이를, forecast는 가장 가능성이 큰 방향이나 시기를, advice는 먼저 할 행동을, explain은 중심 원인을, analysis는 가장 중요한 발견을 verdict.value에 직접 쓴다.
 - explain의 statement는 "중심 원인은 …", forecast는 "예상 시기/가장 가능성이 큰 흐름은 …", advice는 "먼저 할 행동은 …", analysis는 "핵심은 …"처럼 답의 유형이 실제로 충족됐는지 첫 문장만 읽어도 알 수 있게 쓴다. 질문을 다시 말하거나 "살펴본다/확인한다"로 끝내지 않는다.
 - decisive=true이면 "상황에 따라", "조건을 더 확인", "판단하기 어렵다", "둘 다"로 답을 미루지 않는다. 확인 사항과 예외는 verdict.statement 뒤에 쓴다.
 - 추천이나 선택 자체는 허용되지만, 카드만으로 후보의 맛·영양·효과·가격·타인의 감정·미래 사실을 안다고 주장하지 않는다.
-- 후보 비교형에서는 카드 의미를 "이 후보를 선택하는 판단에 지지/주의를 더하는 상징 신호"로만 연결한다. 후보 자체가 감정·성격·효과·결과를 가진 것처럼 쓰거나, 사용자가 말하지 않은 준비 상태·환경·경험을 예측하지 않는다.
-- 후보 비교형 axes는 후보마다 하나씩 만들고 각 label을 해당 후보 이름으로 시작한다. 후보가 2개라서 최소 3개 축이 필요할 때는 선택·추천이면 "결론 선명도", compare이면 "비교 선명도" 축 하나만 추가한다. 질문에 없는 별도 평가 속성을 축으로 만들지 않는다.`;
+- 후보 비교형(choose_one, yes_no, compare)에서는 카드 의미를 "이 후보를 선택하는 판단에 지지/주의를 더하는 상징 신호"로만 연결한다. 후보 자체가 감정·성격·효과·결과를 가진 것처럼 쓰거나, 사용자가 말하지 않은 준비 상태·환경·경험을 예측하지 않는다.
+- 후보 비교형 axes는 후보마다 하나씩 만들고 각 label을 해당 후보 이름으로 시작한다. 후보가 2개라서 최소 3개 축이 필요할 때는 선택이면 "결론 선명도", compare이면 "비교 선명도" 축 하나만 추가한다. 질문에 없는 별도 평가 속성을 축으로 만들지 않는다.
+- recommend_one의 axes는 공개 전 만들지 않은 대안들을 사후에 나열하지 않는다. 카드 역할과 질문의 실제 판단 신호를 3~5개 축으로 표시하고, 특정 후보 간 비교인 것처럼 꾸미지 않는다.`;
   const prompt = `다음 질문과 카드로 종합 해석을 생성하라.
 현재 질문: ${JSON.stringify(question)}
 대화 맥락: ${JSON.stringify(context ?? null)}
@@ -600,7 +610,7 @@ JSON 자료형 예시:
 
 한국어의 text, questionConnection, decisionImpact를 합쳐 읽었을 때 질문에 나온 대상과 행동이 분명해야 한다. sourceMeaning은 카드 원뜻만 정확히 설명하고, questionConnection에서 원뜻→자리 역할→결론의 이유를 순서대로 연결한다. 추상명사를 세 개 이상 이어 붙이거나 "적절하다", "필요하다"로만 결론내리지 않는다.
 positionFocus, positionTitle, sourceMeaning, questionConnection, decisionImpact, evidenceCardIds 같은 JSON 키 이름을 사용자에게 보이는 문장에 쓰지 않는다.
-recommend_one에서는 candidates가 이미 질문에 맞게 생성된 구체적인 후보이므로 그중 하나를 실제 답으로 말한다. 직접 추천하는 행위와 확인되지 않은 사실을 만드는 행위를 혼동하지 않는다.
+recommend_one에서는 카드 공개 전 후보가 없다. 모든 카드를 해석한 뒤 질문에 직접 답하는 구체적인 대상이나 행동 하나를 처음 생성한다. 직접 추천하는 행위와 확인되지 않은 사실을 만드는 행위를 혼동하지 않는다.
 질문이나 대화 맥락에 없는 현실 정보는 카드 근거로 새로 만들지 않는다. 특히 신체 상태, 건강·영양, 가격, 날씨, 타인의 속마음, 합격·성공 같은 외부 사실은 사용자가 직접 확인할 정보와 타로 해석을 구분한다.
 질문에 없는 속성을 이유로 특정 후보가 객관적으로 더 낫다고 주장하지 않는다. 카드의 의미는 후보를 비교하는 타로 신호나 사용자의 판단 방식으로 설명한다.
 추가 질문이면 이전 해석을 반복하지 말고 변화한 판단과 새 카드의 영향에 집중한다.
@@ -631,7 +641,7 @@ async function resolveAiOrLocal<T>(
   ai: WorkersAIBinding | undefined,
   label: "plan" | "interpretation",
   aiTask: (binding: WorkersAIBinding) => Promise<T>,
-  localTask: () => T,
+  localTask: (error?: unknown) => T,
 ): Promise<{ data: T; mode: "ai" | "local" }> {
   if (!ai) return { data: localTask(), mode: "local" };
   try {
@@ -640,7 +650,7 @@ async function resolveAiOrLocal<T>(
     if (!(error instanceof ApiError) || error.status < 500) throw error;
     console.warn("[tarot-ai] using validated local fallback", { label, code: error.code });
     try {
-      return { data: localTask(), mode: "local" };
+      return { data: localTask(error), mode: "local" };
     } catch (fallbackError) {
       if (
         ["DAILY_AI_LIMIT", "BACKUP_AI_RATE_LIMIT", "BACKUP_AI_UNAVAILABLE", "INVALID_AI_RESPONSE"].includes(error.code)
@@ -654,9 +664,16 @@ async function resolveAiOrLocal<T>(
   }
 }
 
-function canUseContractFallback(contract: AnswerContract): boolean {
-  return ["choose_one", "recommend_one", "yes_no", "compare"].includes(contract.kind)
+function canUseInterpretationFallback(contract: AnswerContract): boolean {
+  return ["choose_one", "yes_no", "compare"].includes(contract.kind)
     && contract.candidates.length >= 2;
+}
+
+export function canUsePlanFallback(contract: AnswerContract, error?: unknown): boolean {
+  if (canUseInterpretationFallback(contract)) return true;
+  return contract.kind === "recommend_one"
+    && error instanceof ApiError
+    && error.code === "INVALID_AI_RESPONSE";
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -683,9 +700,9 @@ export async function POST(request: Request): Promise<Response> {
           input.context,
           runtimeEnv.GROQ_API_KEY,
         ),
-        () => {
+        (planError) => {
           const plan = readingPlanSchema.parse(designReading(input.question, input.followup, input.language, input.context));
-          if (!canUseContractFallback(plan.answerContract)) {
+          if (!canUsePlanFallback(plan.answerContract, planError)) {
             throw new ApiError(503, "AI_PLANNING_UNAVAILABLE", "질문에 맞는 카드 구성을 만들 AI를 현재 사용할 수 없습니다. 잠시 후 다시 시도하세요.");
           }
           return plan;
@@ -713,7 +730,7 @@ export async function POST(request: Request): Promise<Response> {
         runtimeEnv.GROQ_API_KEY,
       ),
       () => {
-        if (!canUseContractFallback(effectiveContract)) {
+        if (!canUseInterpretationFallback(effectiveContract)) {
           throw new ApiError(503, "AI_INTERPRETATION_UNAVAILABLE", "질문을 충분히 해석할 AI를 현재 사용할 수 없습니다. 잠시 후 다시 시도하세요.");
         }
         return readingResultSchema.parse(generateReadingResult(input.question, input.cards, input.previous, input.language, effectiveContract));

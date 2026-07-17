@@ -1222,6 +1222,7 @@ img {
 
 .position-orbit span {
   display: inline-flex;
+  max-width: min(220px, calc(100% - 8px));
   padding: 7px 10px 7px 7px;
   align-items: center;
   gap: 7px;
@@ -1229,6 +1230,15 @@ img {
   border-radius: 999px;
   background: rgb(12 12 13 / 72%);
   font-size: 13px;
+  text-align: left;
+}
+
+.position-orbit b {
+  max-width: 175px;
+  font-weight: inherit;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .position-orbit i {
@@ -1369,8 +1379,8 @@ img {
 }
 
 .spread-slot small {
-  display: block;
-  min-height: 14px;
+  display: -webkit-box;
+  min-height: 28px;
   width: 100%;
   padding: 0 2px;
   overflow: hidden;
@@ -1380,14 +1390,15 @@ img {
   font-size: 11px;
   line-height: 14px;
   text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .deck-scroll {
   position: absolute;
   z-index: 3;
-  top: 140px;
+  top: 156px;
   right: 0;
   bottom: 164px;
   left: 0;
@@ -1758,6 +1769,14 @@ img {
   color: #c2c2bf;
   font-size: 17px;
   line-height: 1.7;
+}
+
+.summary-main .summary-detail {
+  max-width: 760px;
+  margin: -10px 0 14px;
+  color: #c2c2bf;
+  font-size: 15px;
+  line-height: 1.65;
 }
 
 .summary-console aside {
@@ -2393,7 +2412,7 @@ img {
   }
 
   .deck-scroll {
-    top: 140px;
+    top: 156px;
     bottom: 148px;
   }
 
@@ -2643,6 +2662,14 @@ img {
 
   .position-orbit {
     max-width: calc(100vw - 30px);
+  }
+
+  .position-orbit span {
+    max-width: min(190px, calc(100vw - 38px));
+  }
+
+  .position-orbit b {
+    max-width: 145px;
   }
 
   .selected-spread {
@@ -3254,6 +3281,7 @@ textarea:focus-visible {
 .console-header p,
 .console-header > span,
 .console-tabs button,
+.summary-main .summary-detail,
 .summary-main > p:last-child,
 .summary-console ol,
 .card-console-copy h2 small,
@@ -3480,6 +3508,13 @@ textarea:focus-visible {
   margin-bottom: 16px;
   font-size: 27px;
   line-height: 1.42;
+}
+
+.reading-export-detail {
+  margin: -4px 0 12px;
+  color: #444;
+  font-size: 15px;
+  line-height: 1.65;
 }
 
 .reading-export-summary > p:last-child {
@@ -3796,7 +3831,7 @@ textarea:focus-visible {
   }
 
   .deck-scroll {
-    top: 128px;
+    top: 150px;
   }
 
   .reveal-spread {

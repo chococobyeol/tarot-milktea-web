@@ -80,7 +80,7 @@ AI 요청은 설계와 해석으로 분리한다.
 
 ### 4.1 카드 구성
 
-브라우저가 질문, 후속 질문 여부, 언어와 이전 답변 문맥을 `/api/tarot`에 보낸다. 서버는 질문 범위와 카드 수를 검증한 뒤 Workers AI에 1~5장의 자리 구성과 `answerContract`를 요청한다. Workers AI가 정확한 일일 무료 한도 초과 오류를 반환하고 `GROQ_API_KEY`가 설정된 경우에만 Groq의 `qwen/qwen3.6-27b`로 같은 요청을 전환한다. 이 모델은 추론 출력을 끈 JSON Object Mode 응답을 만들고 기존 Zod·품질 검사를 그대로 통과해야 한다. 일반 장애, 용량 부족, 품질 검사 실패에는 공급자를 바꾸지 않는다. 일반 질문의 의미 분류와 열린 추천 후보는 AI가 결정한다. 서버의 로컬 분류기는 AI를 사용할 수 없을 때 보조하고, 사용자가 “추천”, “왜”, “비교”처럼 요구 형태를 명시한 경우의 계약 오류만 제한적으로 검사한다. 원인·이유처럼 답의 형식이 명확한 질문 안에 후보처럼 보이는 구절이 있더라도 선택 질문으로 바꾸지 않는다. 사용자가 질문에 직접 적은 2~5개 선택지는 AI가 다른 후보로 바꾸지 못하도록 서버가 보존한다.
+브라우저가 질문, 후속 질문 여부, 언어와 이전 답변 문맥을 `/api/tarot`에 보낸다. 서버는 질문 범위와 카드 수를 검증한 뒤 Workers AI에 1~5장의 자리 구성과 `answerContract`를 요청한다. Workers AI가 정확한 일일 무료 한도 초과 오류를 반환하고 `GROQ_API_KEY`가 설정된 경우에만 Groq의 `qwen/qwen3.6-27b`로 같은 요청을 전환한다. 이 모델은 추론 출력을 끈 JSON Object Mode 응답을 만들고 기존 Zod·품질 검사를 그대로 통과해야 한다. 일반 장애, 용량 부족, 품질 검사 실패에는 공급자를 바꾸지 않는다. 일반 질문의 의미 분류와 열린 추천의 역할 구성은 AI가 결정한다. 열린 추천은 구성 단계에서 후보를 만들지 않고 `answerContract.candidates`를 빈 배열로 유지하며, 카드 공개 뒤 해석 단계에서 구체적인 답 하나를 생성한다. 서버의 로컬 분류기는 AI를 사용할 수 없을 때 보조하고, 사용자가 “추천”, “왜”, “비교”처럼 요구 형태를 명시한 경우의 계약 오류만 제한적으로 검사한다. 원인·이유처럼 답의 형식이 명확한 질문 안에 후보처럼 보이는 구절이 있더라도 선택 질문으로 바꾸지 않는다. 사용자가 질문에 직접 적은 2~5개 선택지는 AI가 다른 후보로 바꾸지 못하도록 서버가 보존하고, 이처럼 명시된 후보 질문에만 후보별 카드를 배정한다.
 
 응답 주요 필드:
 
@@ -91,7 +91,7 @@ AI 요청은 설계와 해석으로 분리한다.
 - `interpretationFrame`
 - `selectionGuide`
 - `answerContract.kind`: `choose_one`, `recommend_one`, `yes_no`, `compare`, `forecast`, `advice`, `explain`, `analysis`
-- `answerContract.subject`, `answerContract.candidates`, `answerContract.decisive`
+- `answerContract.subject`, `answerContract.candidates`, `answerContract.decisive` (`recommend_one`의 `candidates`는 항상 `[]`)
 
 ### 4.2 카드 해석
 
@@ -111,7 +111,7 @@ AI 요청은 설계와 해석으로 분리한다.
 
 `src/lib/schemas.ts`의 Zod 스키마가 요청과 응답 형태를 검증하고, `src/lib/reading-quality.ts`가 직접 답의 존재, 후보 보존, 첫 문장의 결론, 한국어 구체성, 카드 근거, 질문 범위 이탈과 내부 필드 노출을 검사한다. AI가 작성한 본문을 고정 문장으로 다시 만들지는 않는다. 카드 ID·방향·원뜻·원자료 표시는 서버 데이터로 고정하고, 품질 검사를 통과하지 못한 AI 응답만 오류 이유와 함께 제한된 횟수로 재시도한다.
 
-후속 질문은 이전 질문을 문자열로 합치지 않고 `initialQuestion`, `previousQuestions`, `previousAnswer`, `previousContract`로 전달한다. “그래서 정확히 어느 쪽” 같은 질문은 이전 후보를 이어받고, 새로운 대상의 질문은 이전 후보나 그래프 축을 상속하지 않는다.
+후속 질문은 이전 질문을 문자열로 합치지 않고 `initialQuestion`, `previousQuestions`, `previousAnswer`, `previousContract`로 전달한다. 명시적 후보 선택 뒤의 “그래서 정확히 어느 쪽” 같은 질문은 이전 후보를 이어받는다. 열린 추천은 이전 후보 대신 이전에 생성된 답과 카드 문맥을 전달하며, 새로운 대상의 질문은 이전 후보나 그래프 축을 상속하지 않는다.
 
 ## 5. 데이터와 저장 경계
 

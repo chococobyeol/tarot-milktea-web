@@ -2,6 +2,7 @@ import {
   createAnswerContract,
   extractBinaryChoices,
   extractChoiceCandidates,
+  isOpenRecommendationQuestion,
   toKoreanHaeyo,
   type AnswerContract,
   type BinaryChoices,
@@ -114,8 +115,9 @@ function findDirectChoiceVerdict(summary: string, choices: BinaryChoices): strin
   return selected.length === 1 ? selected[0] : null;
 }
 
-const CONTRACT_CHOICE_KINDS = new Set<AnswerContract["kind"]>(["choose_one", "recommend_one", "yes_no"]);
-const CONTRACT_CANDIDATE_KINDS = new Set<AnswerContract["kind"]>([...CONTRACT_CHOICE_KINDS, "compare"]);
+const CONTRACT_FIXED_CHOICE_KINDS = new Set<AnswerContract["kind"]>(["choose_one", "yes_no"]);
+const CONTRACT_DECISIVE_CHOICE_KINDS = new Set<AnswerContract["kind"]>([...CONTRACT_FIXED_CHOICE_KINDS, "recommend_one"]);
+const CONTRACT_CANDIDATE_KINDS = new Set<AnswerContract["kind"]>([...CONTRACT_FIXED_CHOICE_KINDS, "compare"]);
 const CONTRACT_DECISIVENESS: Record<AnswerContract["kind"], boolean> = {
   choose_one: true,
   recommend_one: true,
@@ -128,7 +130,6 @@ const CONTRACT_DECISIVENESS: Record<AnswerContract["kind"], boolean> = {
 };
 const EXPLICIT_ANSWER_SHAPE: Partial<Record<AnswerContract["kind"], RegExp>> = {
   choose_one: /골라|선택|하나만|pick|choose|which\s+(?:one|option)/iu,
-  recommend_one: /추천(?:해|해줘|해주세요)|(?:뭐|무엇|무슨|어떤).{0,28}(?:먹을까|입을까|살까|읽을까|볼까|갈까|고를까|주문할까)|recommend|(?:what|which).{0,24}should\s+i\s+(?:eat|wear|buy|read|watch|choose|pick)/iu,
   yes_no: /할까\s*말까|예(?:\s*\/\s*|\s*아니면\s*)아니요|yes\s+or\s+no/iu,
   compare: /비교|차이|장단점|compare|difference|pros?\s*(?:and|&)\s*cons?/iu,
   forecast: /언제|시기|전망|향후|when|forecast|outlook/iu,
@@ -136,7 +137,7 @@ const EXPLICIT_ANSWER_SHAPE: Partial<Record<AnswerContract["kind"], RegExp>> = {
   explain: /왜|이유|원인|어째서|why|reason|cause/iu,
 };
 const DEFERRED_ANSWER = /상황에 따라|조건(?:을|부터)? (?:더 )?확인|판단하기 어렵|결정하기 어렵|둘 다|경우에 따라|it depends|need more (?:context|information)|cannot decide|both options/i;
-const GENERIC_RECOMMENDATION = /^(?:적당한|알맞은|괜찮은|좋은|무난한|상황에 맞는|조건에 맞는|추천할 만한)?\s*(?:것|선택|선택지|방법|메뉴|음식|옷|행동|대안|옵션|option|choice|something|whatever fits)$/i;
+const GENERIC_RECOMMENDATION = /^(?:(?:적당한|알맞은|괜찮은|좋은|무난한|상황에 맞는|조건에 맞는|추천할 만한|따뜻한|차가운|매운|가벼운|든든한|간단한|부드러운|자극적(?:인)?|편한|재미있는|조용한)\s*)*(?:것|선택|선택지|방법|메뉴|음식|요리|식사|아침|한식|중식|일식|양식|국물(?:\s*요리)?|면(?:\s*요리)?|밥(?:\s*요리)?|옷|옷차림|작품|영화|책|장소|곳|행동|활동|제품|물건|대안|옵션|option|choice|something|whatever fits)$/i;
 const GENERIC_ANSWER_TOKEN = /^(?:먼저|우선|현재|지금|이번|조금|좀|더|다음|천천히|신중한|신중하게|차분한|차분하게|그냥|일단|상황|흐름|조건|문제|부분|요소|방향|방향성|접근|상태|가능성|전체|전반|필요|중요|적절|다시|이후|그다음|게|것|수|current|situation|flow|condition|issue|factor|direction|approach|carefully|slowly|review|check|consider|decide|decision)$/i;
 const GENERIC_ANSWER_VERB = /^(?:살펴|확인|점검|고려|검토|파악|접근|결정|판단|생각|보여|좋|나)(?:[가-힣]*)$/u;
 const NOVELTY_GENERIC_TOKEN = /^(?:살펴|확인|점검|고려|검토|파악|접근|판단|생각|질문|답변|답|결론|가능|가능성|전망|시기|흐름|방향|변화|결과|상태|상황|조건|문제|원인|이유|핵심|중심|발견|행동|패턴|필요|중요|적절|신중|차분|확실|불확실|있|없|보이|나타나|무언가|뭔가)(?:[가-힣]*)$/u;
@@ -215,10 +216,10 @@ function answerContractIssues(
   if (semanticPattern && !semanticPattern.test(verdict.statement)) {
     issues.push(`${contract.kind} 답변의 첫 문장은 해당 유형이 요구하는 원인·전망·우선 행동·핵심 발견을 명시해야 한다.`);
   }
-  if (CONTRACT_CHOICE_KINDS.has(contract.kind)) {
+  if (CONTRACT_FIXED_CHOICE_KINDS.has(contract.kind)) {
     const matches = contract.candidates.filter((candidate) => normalize(candidate) === normalizedValue);
     if (matches.length !== 1) {
-      issues.push("선택·추천 답은 답변 계약의 후보 중 정확히 하나여야 한다.");
+      issues.push("명시 선택 답은 답변 계약의 후보 중 정확히 하나여야 한다.");
     }
     const selectedCandidate = matches[0];
     const additionalStatementCandidates = contract.candidates.filter((candidate) => (
@@ -240,6 +241,20 @@ function answerContractIssues(
       .map((axis) => axis.score);
     if (verdictAxis && otherCandidateScores.some((score) => score > verdictAxis.score)) {
       issues.push("그래프에서는 최종 선택의 카드 신호가 다른 후보보다 낮게 표시되지 않아야 한다.");
+    }
+  } else if (contract.kind === "recommend_one") {
+    if (
+      verdict.value.trim().length > 28
+      || /평소|자주|늘\s|새로운\s*종류|종류의|계열의|스타일의|느낌의|상황에\s*맞는|조건에\s*맞는|usually|normally|often|a\s+kind\s+of|a\s+type\s+of/iu.test(verdict.value)
+    ) {
+      issues.push("열린 추천의 verdict.value에는 설명이나 조건을 붙이지 말고 바로 고를 수 있는 짧은 대상·행동 이름만 써야 한다.");
+    }
+    if (!normalize(result.guidance.join(" ")).includes(normalizedValue)) {
+      issues.push("guidance에서도 카드 공개 뒤 정한 구체적인 추천을 직접 실행하도록 써야 한다.");
+    }
+    const supplementalText = `${result.synthesis} ${result.guidance.join(" ")}`;
+    if (/(?:아니면|또는|혹은|대신).{0,36}(?:괜찮|추천|먹|입|고르|선택|해도|할 수)|(?:another|alternatively|or instead).{0,36}(?:recommend|choose|pick|eat|wear|also)/iu.test(supplementalText)) {
+      issues.push("열린 추천은 결론 뒤에 다른 대안을 다시 제시하지 말고 정한 답 하나만 유지해야 한다.");
     }
   } else if (contract.kind === "compare") {
     const representedCandidates = contract.candidates.filter((candidate) => (
@@ -304,9 +319,9 @@ const UNSUPPORTED_FOOD_CAUSALITY: RegExp[] = [
   /기분.{0,25}(?:과식|불충분한 식사)/,
 ];
 
-const FOOD_SPECIFIC_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegExp }> = [
-  { output: /자극적(?:인|이다|으로)?/, allowedByQuestion: /자극/ },
-  { output: /화려한|화려하다/, allowedByQuestion: /화려/ },
+const FOOD_SPECIFIC_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: RegExp; symbolicRecommendation?: boolean }> = [
+  { output: /자극적(?:인|이다|으로)?/, allowedByQuestion: /자극/, symbolicRecommendation: true },
+  { output: /화려한|화려하다/, allowedByQuestion: /화려/, symbolicRecommendation: true },
   { output: /든든한 재료/, allowedByQuestion: /든든|재료/ },
   { output: /단백질|탄수화물|지방|식이섬유|칼로리/, allowedByQuestion: /단백질|탄수화물|지방|식이섬유|칼로리/ },
   { output: /미리 정한 식단|평소 식단|식단을 따른다/, allowedByQuestion: /식단/ },
@@ -325,6 +340,8 @@ const CANDIDATE_OPTION_ASSUMPTIONS: Array<{ output: RegExp; allowedByQuestion: R
     allowedByQuestion: /새|새롭|처음|낯설|재료|조리/,
   },
 ];
+
+const UNSUPPORTED_FAMILIARITY_CAUSALITY = /(?:익숙한|낯익은|새로운|낯선).{0,24}(?:라서|이어서|이므로|때문에).{0,28}(?:더\s*)?(?:안정|좋|낫|적합|유리)|(?:familiar|new|unfamiliar).{0,30}(?:therefore|because|so).{0,30}(?:better|safer|more suitable)/iu;
 
 const PHYSICAL_FOOD_POSITION = /포만|영양|소화|에너지|식욕|건강/;
 const PHYSICAL_CARD_REFERENCE = /카드|타로|상징/;
@@ -371,8 +388,8 @@ export function questionScopeGuide(question: string, language: ReadingLanguage):
   const domain = detectEverydayDomain(question);
   if (!domain) {
     return language === "ko"
-      ? "질문에 적힌 범위 안에서 해석한다. 추천 요청에는 구체적인 후보를 만들 수 있지만, 언급되지 않은 현실 상황이나 객관적 사실은 만들어내지 않는다."
-      : "Stay within the question's scope. A recommendation request may introduce concrete candidates, but it must not invent circumstances or objective facts.";
+      ? "질문에 적힌 범위 안에서 해석한다. 열린 추천은 카드 공개 전 후보를 만들지 않고, 카드 해석 뒤 구체적인 답 하나만 제시한다. 언급되지 않은 현실 상황이나 객관적 사실은 만들어내지 않는다."
+      : "Stay within the question's scope. For an open recommendation, do not create candidates before the cards are revealed; name one concrete answer only after interpreting the cards. Do not invent circumstances or objective facts.";
   }
 
   if (language !== "ko") {
@@ -428,27 +445,18 @@ export function enforcePlanQuality(
     };
   }
 
-  if (contract.kind === "choose_one" && !userSuppliedCandidates) {
-    const suppliedText = [
-      context.question,
-      context.conversation?.initialQuestion,
-      ...(context.conversation?.previousQuestions ?? []),
-    ].filter((value): value is string => Boolean(value)).join(" ");
-    const priorCandidates = context.conversation?.previousContract?.candidates ?? [];
-    const suppliedCandidateCount = contract.candidates.filter((candidate) => (
-      normalize(suppliedText).includes(normalize(candidate))
-      || priorCandidates.some((prior) => normalize(prior) === normalize(candidate))
-    )).length;
-    if (suppliedCandidateCount === 0) {
-      contract = { ...contract, kind: "recommend_one", decisive: true };
-    } else if (suppliedCandidateCount !== contract.candidates.length) {
-      throw new Error("사용자가 제시하지 않은 후보를 만든 경우 choose_one이 아니라 recommend_one으로 분류해야 한다.");
-    }
+  if (expectedContract.kind === "recommend_one" && contract.candidates.length > 0) {
+    throw new Error("열린 추천은 카드 공개 전에 후보를 만들지 말고 candidates를 빈 배열로 두어야 한다.");
   }
 
-  const explicitExpectedShape = EXPLICIT_ANSWER_SHAPE[expectedContract.kind]?.test(context.question) ?? false;
+  const explicitExpectedShape = expectedContract.kind === "recommend_one"
+    ? isOpenRecommendationQuestion(context.question)
+    : EXPLICIT_ANSWER_SHAPE[expectedContract.kind]?.test(context.question) ?? false;
   if (!userSuppliedCandidates && explicitExpectedShape && contract.kind !== expectedContract.kind) {
     throw new Error(`질문이 요구한 답변 유형은 ${expectedContract.kind}이며 ${contract.kind}로 바꾸지 말아야 한다.`);
+  }
+  if (contract.kind === "choose_one" && !userSuppliedCandidates) {
+    throw new Error("사용자가 후보를 제시하지 않은 질문은 choose_one 후보를 만들지 말고 recommend_one으로 분류해야 한다.");
   }
   if (contract.decisive !== CONTRACT_DECISIVENESS[contract.kind]) {
     throw new Error(`${contract.kind} 답변의 decisive 값이 답변 유형과 일치하지 않는다.`);
@@ -470,7 +478,7 @@ export function enforcePlanQuality(
   }
 
   const candidateMode = CONTRACT_CANDIDATE_KINDS.has(contract.kind);
-  const choiceMode = CONTRACT_CHOICE_KINDS.has(contract.kind);
+  const choiceMode = CONTRACT_DECISIVE_CHOICE_KINDS.has(contract.kind);
   let orderedPositions = plan.positions;
   if (choiceMode && !contract.decisive) {
     throw new Error("선택·추천 답변은 직접 결론을 내리도록 decisive=true여야 한다.");
@@ -480,7 +488,7 @@ export function enforcePlanQuality(
   }
   if (candidateMode) {
     if (contract.candidates.length < 2 || contract.candidates.length > 5) {
-      throw new Error("선택·추천·비교 답변은 서로 다른 구체적 후보를 2~5개 만들어야 한다.");
+      throw new Error("선택·예/아니오·비교 답변은 서로 다른 구체적 후보를 2~5개 포함해야 한다.");
     }
     if (new Set(contract.candidates.map(normalize)).size !== contract.candidates.length) {
       throw new Error("답변 후보를 중복해서 만들지 말아야 한다.");
@@ -503,6 +511,22 @@ export function enforcePlanQuality(
   if (context.language === "ko" && !candidateMode && plan.positions.some((position) => GENERIC_PLAN_TITLE.test(position.title.trim()))) {
     throw new Error("자리 이름이 질문과 무관한 일반 명사로만 작성되었다.");
   }
+  if (
+    contract.kind === "recommend_one"
+    && plan.positions.some((position) => /(?:선택|option)$/iu.test(position.title.trim()))
+  ) {
+    throw new Error("열린 추천의 카드 자리에 구체 후보를 미리 배정하지 말고 질문에 맞는 해석 역할만 작성해야 한다.");
+  }
+  if (contract.kind === "recommend_one") {
+    const preselectedOptionText = [
+      plan.interpretationFrame,
+      plan.selectionGuide,
+      ...plan.positions.flatMap((position) => [position.title, position.focus]),
+    ].join(" ");
+    if (/(?:후보|선택지)(?:인|은|는|로)\s*\S+|(?:candidates?|options?)\s*(?:are|include|:|such\s+as)/iu.test(preselectedOptionText)) {
+      throw new Error("열린 추천의 구성 문구 전체에서 카드 공개 전 후보나 선택지를 제시하지 말아야 한다.");
+    }
+  }
 
   const domain = detectEverydayDomain(context.question);
   if (context.language === "ko" && candidateMode && domain === "food") {
@@ -518,7 +542,7 @@ export function enforcePlanQuality(
     if (!anchor.test(plan.interpretationFrame)) {
       throw new Error("리딩 구성이 일상 질문의 대상을 직접 언급하지 않는다.");
     }
-    if (plan.positions.some((position) => !anchor.test(`${position.title} ${position.focus}`))) {
+    if (orderedPositions.some((position) => !anchor.test(`${position.title} ${position.focus}`))) {
       throw new Error("각 카드 자리가 일상 질문에 맞는 구체적인 기준으로 작성되지 않았다.");
     }
   }
@@ -750,7 +774,12 @@ export function enforceReadingQuality(
     || (context.answerContract
       && CONTRACT_CANDIDATE_KINDS.has(context.answerContract.kind)
       && context.answerContract.candidates.length >= 2));
-  if (candidateComparison) {
+  const unsupportedFamiliarityClaim = visibleText.match(UNSUPPORTED_FAMILIARITY_CAUSALITY)?.[0];
+  if (unsupportedFamiliarityClaim) {
+    issues.push(`사용자 경험을 확인하지 않은 친숙함·새로움의 인과관계 "${unsupportedFamiliarityClaim}"을 만들지 말아야 한다.`);
+  }
+  const checksSpecificRecommendationClaims = candidateComparison;
+  if (checksSpecificRecommendationClaims) {
     const suppliedCandidateContext = [
       scopeQuestion,
       ...(expectedCards?.flatMap((card) => [card.positionTitle, card.positionFocus]) ?? []),
@@ -831,7 +860,9 @@ export function enforceReadingQuality(
       ].join(" ");
       for (const assumption of FOOD_SPECIFIC_ASSUMPTIONS) {
         const match = visibleText.match(assumption.output)?.[0];
-        if (match && !assumption.allowedByQuestion.test(suppliedFoodContext)) {
+        const allowedAsSymbolicProposal = context.answerContract?.kind === "recommend_one"
+          && assumption.symbolicRecommendation;
+        if (match && !allowedAsSymbolicProposal && !assumption.allowedByQuestion.test(suppliedFoodContext)) {
           issues.push(`질문에 없는 음식 특성 "${match}"을 만들어내지 말아야 한다.`);
         }
       }

@@ -56,6 +56,7 @@ import {
   MILK_TEA_IMAGE,
   orientationLabel,
   type DeckCard,
+  type AnswerContract,
   type FollowupRecord,
   type ReadingContext,
   type ReadingPlan,
@@ -105,7 +106,17 @@ const NICKNAME_KEY = "tarot-milktea-nickname";
 const LANGUAGE_KEY = "tarot-milktea-language";
 
 function hasAnswerContract(plan: ReadingPlan | null): boolean {
-  return Boolean((plan as Partial<ReadingPlan> | null)?.answerContract);
+  const contract = (plan as Partial<ReadingPlan> | null)?.answerContract;
+  return Boolean(contract
+    && !(contract.kind === "recommend_one" && contract.candidates.length > 0));
+}
+
+function contextAnswerContract(plan: ReadingPlan | null | undefined): AnswerContract | undefined {
+  const contract = (plan as Partial<ReadingPlan> | null | undefined)?.answerContract;
+  if (!contract) return undefined;
+  return contract.kind === "recommend_one" && contract.candidates.length > 0
+    ? { ...contract, candidates: [] }
+    : contract;
 }
 
 function localDateStamp(date = new Date()): string {
@@ -169,6 +180,17 @@ function resultText(question: string, result: ReadingResult, language: AppLangua
   ].join("\n");
 }
 
+function resultHeadline(result: ReadingResult): string {
+  return result.verdict?.statement.trim() || result.summary.trim();
+}
+
+function resultSummaryDetail(result: ReadingResult): string {
+  const headline = resultHeadline(result);
+  const summary = result.summary.trim();
+  if (summary === headline) return "";
+  return summary.startsWith(headline) ? summary.slice(headline.length).trim() : summary;
+}
+
 function userError(error: unknown, language: AppLanguage = "ko"): string {
   const english = language === "en";
   if (error instanceof TarotApiError) {
@@ -196,7 +218,7 @@ function canUseLocalInterpretation(error: unknown): boolean {
 function canGenerateLocalReading(plan: ReadingPlan): boolean {
   const contract = (plan as Partial<ReadingPlan>).answerContract;
   return Boolean(contract
-    && ["choose_one", "recommend_one", "yes_no", "compare"].includes(contract.kind)
+    && ["choose_one", "yes_no", "compare"].includes(contract.kind)
     && contract.candidates.length >= 2);
 }
 
@@ -336,7 +358,8 @@ function ReadingExport({
 
       <section className="reading-export-summary">
         <p className="reading-export-kicker">CORE RESULT</p>
-        <h2>{result.summary}</h2>
+        <h2>{resultHeadline(result)}</h2>
+        {resultSummaryDetail(result) ? <p className="reading-export-detail">{resultSummaryDetail(result)}</p> : null}
         <p>{result.synthesis}</p>
       </section>
 
@@ -751,7 +774,7 @@ export function TarotApp() {
       initialQuestion: question,
       previousQuestions: followups.map((item) => item.question),
       previousAnswer: result?.verdict?.statement ?? result?.summary,
-      previousContract: followups.at(-1)?.plan?.answerContract ?? initialPlan?.answerContract,
+      previousContract: contextAnswerContract(followups.at(-1)?.plan ?? initialPlan),
     };
   }
 
@@ -866,7 +889,7 @@ export function TarotApp() {
         initialQuestion: question,
         previousQuestions: followups.map((item) => item.question),
         previousAnswer: result?.verdict?.statement ?? result?.summary,
-        previousContract: followups.at(-1)?.plan?.answerContract ?? initialPlan?.answerContract,
+        previousContract: contextAnswerContract(followups.at(-1)?.plan ?? initialPlan),
       };
       const response = await requestReadingPlan(value, true, language, context);
       await minimumPlanningTime;
@@ -1165,7 +1188,7 @@ export function TarotApp() {
               <div className="plan-deck-stack"><CardBack /><CardBack /></div>
               <div className="position-orbit">
                 {activePlan.positions.map((position, index) => (
-                  <span key={position.id}><i>{index + 1}</i>{position.title}</span>
+                  <span key={position.id}><i>{index + 1}</i><b>{position.title}</b></span>
                 ))}
               </div>
             </div>
@@ -1390,7 +1413,8 @@ export function TarotApp() {
                   <div className="summary-console">
                     <div className="summary-main">
                       <p className="console-kicker">CORE RESULT</p>
-                      <h2>{result.summary}</h2>
+                      <h2>{resultHeadline(result)}</h2>
+                      {resultSummaryDetail(result) ? <p className="summary-detail">{resultSummaryDetail(result)}</p> : null}
                       <p>{result.synthesis}</p>
                     </div>
                     <aside>

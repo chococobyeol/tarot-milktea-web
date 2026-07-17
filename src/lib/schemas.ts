@@ -27,9 +27,15 @@ export const answerContractSchema = z.object({
   if (contract.decisive !== decisiveKinds.has(contract.kind)) {
     context.addIssue({ code: "custom", message: "답변 유형과 직접 결론 여부가 일치하지 않습니다.", path: ["decisive"] });
   }
-  const candidateKinds = new Set(["choose_one", "recommend_one", "yes_no", "compare"]);
+  const candidateKinds = new Set(["choose_one", "yes_no", "compare"]);
   if (!candidateKinds.has(contract.kind) && contract.candidates.length > 0) {
     context.addIssue({ code: "custom", message: "이 답변 유형에는 선택 후보를 넣을 수 없습니다.", path: ["candidates"] });
+  }
+  if ((contract.kind === "choose_one" || contract.kind === "compare") && contract.candidates.length < 2) {
+    context.addIssue({ code: "custom", message: "명시 선택과 비교에는 사용자가 제시한 후보가 2개 이상 필요합니다.", path: ["candidates"] });
+  }
+  if (contract.kind === "yes_no" && contract.candidates.length !== 2) {
+    context.addIssue({ code: "custom", message: "예/아니오 답변에는 두 후보가 필요합니다.", path: ["candidates"] });
   }
 });
 
