@@ -42,15 +42,32 @@ export interface AiJsonProvider {
 
 export type AiFallbackReason = "daily-limit" | "workers-error" | "quality-retry";
 
+interface AiProviderErrorDetails {
+  upstreamStatus?: number;
+  upstreamCode?: string;
+  upstreamType?: string;
+  upstreamRequestId?: string;
+}
+
 export class AiProviderError extends Error {
+  public readonly upstreamStatus?: number;
+  public readonly upstreamCode?: string;
+  public readonly upstreamType?: string;
+  public readonly upstreamRequestId?: string;
+
   constructor(
     public readonly provider: AiProviderName,
     public readonly kind: AiProviderErrorKind,
     public readonly retryable: boolean,
     public readonly retryAfter?: number,
+    details: AiProviderErrorDetails = {},
   ) {
     super(`${provider}:${kind}`);
     this.name = "AiProviderError";
+    this.upstreamStatus = details.upstreamStatus;
+    this.upstreamCode = details.upstreamCode;
+    this.upstreamType = details.upstreamType;
+    this.upstreamRequestId = details.upstreamRequestId;
   }
 }
 
@@ -141,30 +158,46 @@ function retryAfterSeconds(response: Response): number | undefined {
 interface GroqErrorPayload {
   error?: {
     code?: unknown;
+    type?: unknown;
   };
+}
+
+function safeUpstreamIdentifier(value: unknown, maxLength = 120): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > maxLength || !/^[a-z0-9._:-]+$/i.test(trimmed)) return undefined;
+  return trimmed;
 }
 
 function groqHttpError(response: Response, payload: GroqErrorPayload | null): AiProviderError {
   const retryAfter = retryAfterSeconds(response);
+  const details: AiProviderErrorDetails = {
+    upstreamStatus: response.status,
+    upstreamCode: safeUpstreamIdentifier(payload?.error?.code),
+    upstreamType: safeUpstreamIdentifier(payload?.error?.type),
+    upstreamRequestId: safeUpstreamIdentifier(
+      response.headers.get("x-request-id") ?? response.headers.get("cf-ray"),
+    ),
+  };
   if (response.status === 429) {
-    return new AiProviderError("groq", "rate_limit", false, retryAfter);
+    return new AiProviderError("groq", "rate_limit", false, retryAfter, details);
   }
   if (response.status === 401 || response.status === 403) {
-    return new AiProviderError("groq", "authentication", false);
+    return new AiProviderError("groq", "authentication", false, undefined, details);
   }
   if (response.status === 400 && payload?.error?.code === "json_validate_failed") {
-    return new AiProviderError("groq", "invalid_response", true);
+    return new AiProviderError("groq", "invalid_response", true, undefined, details);
   }
   if (response.status === 400 || response.status === 404) {
-    return new AiProviderError("groq", "invalid_request", false);
+    return new AiProviderError("groq", "invalid_request", false, undefined, details);
   }
   if (response.status === 408) {
-    return new AiProviderError("groq", "timeout", true, retryAfter);
+    return new AiProviderError("groq", "timeout", true, retryAfter, details);
   }
   if (response.status === 422) {
-    return new AiProviderError("groq", "invalid_response", true, retryAfter);
+    return new AiProviderError("groq", "invalid_response", true, retryAfter, details);
   }
-  return new AiProviderError("groq", "unavailable", response.status >= 500, retryAfter);
+  return new AiProviderError("groq", "unavailable", response.status >= 500, retryAfter, details);
 }
 
 async function runGroqJson(

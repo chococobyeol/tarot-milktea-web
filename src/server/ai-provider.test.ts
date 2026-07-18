@@ -440,6 +440,8 @@ describe("quota fallback AI provider", () => {
       provider: "groq",
       kind: "invalid_response",
       retryable: true,
+      upstreamStatus: 400,
+      upstreamCode: "json_validate_failed",
     });
     expect((error as Error).message).not.toContain(privateUpstreamBody);
 
@@ -458,7 +460,13 @@ describe("quota fallback AI provider", () => {
     const privateUpstreamBody = "private-upstream-detail";
     const fetcher = vi.fn(async () => new Response(
       JSON.stringify({ error: { message: privateUpstreamBody } }),
-      { status, headers: { "content-type": "application/json" } },
+      {
+        status,
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "req-safe-123",
+        },
+      },
     )) as unknown as typeof fetch;
     const provider = createQuotaFallbackAiProvider({
       workersAi: workersBinding(async () => {
@@ -477,7 +485,13 @@ describe("quota fallback AI provider", () => {
     });
     const error = await provider.run(request).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(AiProviderError);
-    expect(error).toMatchObject({ provider: "groq", kind, retryable });
+    expect(error).toMatchObject({
+      provider: "groq",
+      kind,
+      retryable,
+      upstreamStatus: status,
+      upstreamRequestId: "req-safe-123",
+    });
     expect((error as Error).message).not.toContain(privateUpstreamBody);
     expect((error as Error).message).not.toContain("test-key");
   });

@@ -4,13 +4,13 @@ import {
   createAiInterpretation,
   createAiPlan,
 } from "@/app/api/tarot/route";
-import type { AnswerContract } from "@/src/lib/tarot";
+import type { AnswerContract, ReadingPlan } from "@/src/lib/tarot";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function aiPlan(cardCount: number) {
+function aiPlan(cardCount: number): Omit<ReadingPlan, "cardCount"> {
   return {
     interpretationFrame: "질문에 답하는 데 필요한 역할을 카드로 읽어요.",
     selectionGuide: `${cardCount}장의 카드를 선택해요.`,
@@ -105,12 +105,13 @@ describe("AI-owned planning", () => {
     expect(workersRun).toHaveBeenCalledTimes(2);
     expect(groqFetch).not.toHaveBeenCalled();
     const retry = workersRun.mock.calls[1][1] as { messages: Array<{ content: string }> };
-    expect(retry.messages[1].content).toContain("이전 출력은 다음 검증을 통과하지 못했다");
+    expect(retry.messages[1].content).toContain("이전 출력 검증 결과");
     expect(retry.messages[1].content).toContain("후보를 새로 만들지 말고");
     expect(retry.messages[1].content).toContain("질문의 의미를 다시 판단");
+    expect(retry.messages[1].content).toContain("검증에서 거절된 이전 JSON 출력");
   });
 
-  it("uses Groq only after the same planner rejects two corrected outputs", async () => {
+  it("uses Groq only after Workers rejects three outputs", async () => {
     const invalid = aiPlan(2);
     invalid.answerContract = {
       kind: "choose_one",
@@ -139,8 +140,159 @@ describe("AI-owned planning", () => {
     );
 
     expect(plan.answerContract.kind).toBe("recommend_one");
-    expect(workersRun).toHaveBeenCalledTimes(2);
+    expect(workersRun).toHaveBeenCalledTimes(3);
     expect(groqFetch).toHaveBeenCalledTimes(1);
+    const [, groqInit] = groqFetch.mock.calls[0] as unknown as [string, RequestInit];
+    const groqBody = JSON.parse(String(groqInit.body)) as {
+      response_format: { type: string };
+      messages: Array<{ content: string }>;
+    };
+    expect(groqBody.response_format).toEqual({ type: "json_object" });
+    expect(groqBody.messages[1].content).toContain("검증에서 거절된 이전 JSON 출력");
+    expect(groqBody.messages[1].content).toContain("AI가 만든 후보");
+  });
+
+  it("feeds each rejected Groq output back until its third output succeeds", async () => {
+    const invalid = aiPlan(2);
+    invalid.answerContract = {
+      kind: "choose_one",
+      subject: "열린 추천",
+      candidates: ["AI가 만든 후보"],
+    };
+    const corrected = aiPlan(2);
+    corrected.answerContract = {
+      kind: "recommend_one",
+      subject: "조건을 지킨 추천 하나",
+      candidates: [],
+    };
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify(invalid) }));
+    const groqFetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        choices: [{ message: { content: JSON.stringify(invalid) } }],
+      }))
+      .mockResolvedValueOnce(Response.json({
+        choices: [{ message: { content: JSON.stringify(invalid) } }],
+      }))
+      .mockResolvedValueOnce(Response.json({
+        choices: [{ message: { content: JSON.stringify(corrected) } }],
+      }));
+    vi.stubGlobal("fetch", groqFetch);
+
+    const plan = await createAiPlan(
+      { run: workersRun },
+      "정해진 후보 없이 조건에 맞는 것 하나를 추천해줘",
+      false,
+      "ko",
+      undefined,
+      "test-groq-key",
+    );
+
+    expect(plan.answerContract.kind).toBe("recommend_one");
+    expect(workersRun).toHaveBeenCalledTimes(3);
+    expect(groqFetch).toHaveBeenCalledTimes(3);
+    for (const callIndex of [1, 2]) {
+      const [, init] = groqFetch.mock.calls[callIndex] as unknown as [string, RequestInit];
+      const body = JSON.parse(String(init.body)) as { messages: Array<{ content: string }> };
+      expect(body.messages[1].content).toContain("이전 출력 검증 결과");
+      expect(body.messages[1].content).toContain("AI가 만든 후보");
+      expect(body.messages[1].content).toContain("검증에서 거절된 이전 JSON 출력");
+    }
+  });
+
+  it("retries a Groq JSON-generation rejection with explicit correction feedback", async () => {
+    const corrected = aiPlan(2);
+    corrected.answerContract = {
+      kind: "recommend_one",
+      subject: "조건을 지킨 추천 하나",
+      candidates: [],
+    };
+    const workersRun = vi.fn(async () => {
+      throw new Error("4006: daily free allocation exhausted");
+    });
+    const groqFetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { code: "json_validate_failed", type: "invalid_request_error" },
+      }), { status: 400, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(Response.json({
+        choices: [{ message: { content: JSON.stringify(corrected) } }],
+      }));
+    vi.stubGlobal("fetch", groqFetch);
+
+    const plan = await createAiPlan(
+      { run: workersRun },
+      "조건에 맞는 것 하나를 추천해줘",
+      false,
+      "ko",
+      undefined,
+      "test-groq-key",
+    );
+
+    expect(plan.answerContract.kind).toBe("recommend_one");
+    expect(groqFetch).toHaveBeenCalledTimes(2);
+    const [, retryInit] = groqFetch.mock.calls[1] as unknown as [string, RequestInit];
+    const retryBody = JSON.parse(String(retryInit.body)) as { messages: Array<{ content: string }> };
+    expect(retryBody.messages[1].content).toContain("AI 서비스가 요청한 JSON 객체를 완성하지 못했다");
+  });
+
+  it("retries one transient Groq 503 before returning a valid plan", async () => {
+    const corrected = aiPlan(2);
+    corrected.answerContract = {
+      kind: "recommend_one",
+      subject: "조건을 지킨 추천 하나",
+      candidates: [],
+    };
+    const workersRun = vi.fn(async () => {
+      throw new Error("4006: daily free allocation exhausted");
+    });
+    const groqFetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { code: "service_unavailable", type: "server_error" },
+      }), { status: 503, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(Response.json({
+        choices: [{ message: { content: JSON.stringify(corrected) } }],
+      }));
+    vi.stubGlobal("fetch", groqFetch);
+
+    const plan = await createAiPlan(
+      { run: workersRun },
+      "조건에 맞는 것 하나를 추천해줘",
+      false,
+      "ko",
+      undefined,
+      "test-groq-key",
+    );
+
+    expect(plan.answerContract.kind).toBe("recommend_one");
+    expect(groqFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 502 instead of 503 after both providers reject three outputs", async () => {
+    const invalid = aiPlan(2);
+    invalid.answerContract = {
+      kind: "choose_one",
+      subject: "열린 추천",
+      candidates: ["AI가 만든 후보"],
+    };
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify(invalid) }));
+    const groqFetch = vi.fn(async () => Response.json({
+      choices: [{ message: { content: JSON.stringify(invalid) } }],
+    }));
+    vi.stubGlobal("fetch", groqFetch);
+
+    await expect(createAiPlan(
+      { run: workersRun },
+      "정해진 후보 없이 조건에 맞는 것 하나를 추천해줘",
+      false,
+      "ko",
+      undefined,
+      "test-groq-key",
+    )).rejects.toMatchObject({
+      status: 502,
+      code: "INVALID_AI_RESPONSE",
+    });
+
+    expect(workersRun).toHaveBeenCalledTimes(3);
+    expect(groqFetch).toHaveBeenCalledTimes(3);
   });
 
   it("derives four cards from the AI-selected roles for a short question", async () => {
