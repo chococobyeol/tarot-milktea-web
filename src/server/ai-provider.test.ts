@@ -65,6 +65,70 @@ describe("quota fallback AI provider", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("uses low reasoning for Workers AI GPT-OSS models", async () => {
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify({ value: "workers" }) }));
+    const provider = createQuotaFallbackAiProvider({
+      workersAi: workersBinding(workersRun),
+      workersModel: "@cf/openai/gpt-oss-120b",
+      groqModel: "openai/gpt-oss-120b",
+    });
+
+    await provider.run(request);
+
+    expect(workersRun).toHaveBeenCalledWith(
+      "@cf/openai/gpt-oss-120b",
+      expect.objectContaining({
+        reasoning_effort: "low",
+        response_format: {
+          type: "json_schema",
+          json_schema: request.jsonSchema.schema,
+        },
+      }),
+    );
+    const input = workersRun.mock.calls[0][1] as Record<string, unknown>;
+    expect(input).not.toHaveProperty("chat_template_kwargs");
+  });
+
+  it("keeps the non-thinking template switch for non-GPT-OSS Workers models", async () => {
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify({ value: "workers" }) }));
+    const provider = createQuotaFallbackAiProvider({
+      workersAi: workersBinding(workersRun),
+      workersModel: "@cf/google/gemma-4-26b-a4b-it",
+      groqModel: "openai/gpt-oss-120b",
+    });
+
+    await provider.run(request);
+
+    expect(workersRun).toHaveBeenCalledWith(
+      "@cf/google/gemma-4-26b-a4b-it",
+      expect.objectContaining({
+        chat_template_kwargs: { enable_thinking: false },
+      }),
+    );
+    const input = workersRun.mock.calls[0][1] as Record<string, unknown>;
+    expect(input).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("treats a Workers JSON Mode generation failure as a correctable output", async () => {
+    const workersRun = vi.fn()
+      .mockRejectedValueOnce(new Error("JSON Mode couldn't be met for this response"))
+      .mockResolvedValueOnce({ response: JSON.stringify({ value: "workers" }) });
+    const provider = createQuotaFallbackAiProvider({
+      workersAi: workersBinding(workersRun),
+      workersModel: "@cf/openai/gpt-oss-120b",
+      groqModel: "openai/gpt-oss-120b",
+    });
+
+    await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "invalid_response",
+      retryable: true,
+    });
+    expect(provider.activeProvider).toBe("workers-ai");
+    await expect(provider.run(request)).resolves.toEqual(expect.any(Object));
+    expect(workersRun).toHaveBeenCalledTimes(2);
+  });
+
   it("bounds a hanging Workers AI call with its configured timeout", async () => {
     vi.useFakeTimers();
     try {
@@ -291,7 +355,7 @@ describe("quota fallback AI provider", () => {
     expect(body.model).toBe("openai/gpt-oss-120b");
   });
 
-  it("uses Groq for generic Cloudflare failures", async () => {
+  it("retries Workers once before using Groq for generic Cloudflare failures", async () => {
     const fetcher = vi.fn(async () => groqSuccess()) as unknown as typeof fetch;
     const provider = createQuotaFallbackAiProvider({
       workersAi: workersBinding(async () => { throw new Error("429: temporary request rate limit"); }),
@@ -301,6 +365,12 @@ describe("quota fallback AI provider", () => {
       fetcher,
     });
 
+    await expect(provider.run(request)).rejects.toMatchObject({
+      provider: "workers-ai",
+      kind: "unavailable",
+      retryable: true,
+    });
+    expect(provider.activeProvider).toBe("workers-ai");
     await expect(provider.run(request)).rejects.toMatchObject({
       provider: "workers-ai",
       kind: "unavailable",

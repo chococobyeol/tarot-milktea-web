@@ -39,7 +39,8 @@ import {
   type WorkersAIBinding,
 } from "@/src/server/security";
 
-const WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
+const WORKERS_PLAN_MODEL = "@cf/openai/gpt-oss-120b";
+const WORKERS_INTERPRETATION_MODEL = "@cf/openai/gpt-oss-120b";
 const GROQ_PLAN_MODEL = "openai/gpt-oss-120b";
 const GROQ_INTERPRETATION_MODEL = "openai/gpt-oss-120b";
 const GROQ_INTERPRETATION_CORRECTION_MODEL = GROQ_INTERPRETATION_MODEL;
@@ -65,7 +66,7 @@ const PLAN_SYSTEM_PROMPT = `당신은 타로밀크티 웹의 리딩 계획 엔�
 - 어떤 대상이 언급되었다는 이유만으로 선택 후보로 취급하지 않는다.
 - 사용자가 현재 선택하거나 비교할 수 있게 제시한 닫힌 대안 집합만 candidates에 넣는다.
 - 제외·거절한 대상, 필수 조건, 선호, 예시, 과거 선택, 상황 설명은 후보가 아니라 제약 또는 배경이다.
-- 닫힌 후보 집합이 없으면 후보를 만들지 않는다. 중요한 제약은 subject, interpretationFrame, position의 focus에 보존한다.
+- 닫힌 후보 집합이 없으면 후보를 만들지 않는다. 제외·요구·선호 조건은 constraints에, 사용자가 원하는 최종 답의 형태는 answerInstruction에 보존한다.
 - 요청에서 지정한 출력 언어로 짧고 구체적인 문자열을 작성한다.
 - 반드시 JSON 객체만 출력한다.`;
 
@@ -82,10 +83,10 @@ const INTERPRETATION_SYSTEM_PROMPT = `당신은 타로밀크티 웹의 해석 �
 - "서로 다른 측면", "요소가 상호작용한다", "균형 잡힌 고려", "분리를 통해 접근" 같은 내용 없는 문장을 쓰지 않는다.
 - 요약, 종합 해석, 확인할 점에서 같은 내용을 반복하지 않는다.
 - 카드별 sourceMeaning에서는 제공된 원뜻을 정확히 설명하고, 그 밖의 영역에서는 카드 데이터 문장을 그대로 복사하지 말고 질문에 맞는 실제 판단 기준이나 행동으로 바꿔 쓴다.
-- 질문의 분야가 무엇이든 카드 상징에서 필요한 성질·상태·감정·결과를 자유롭게 추론하되, 어떤 카드 원뜻과 자리 역할에서 나온 판단인지 밝힌다.
+- 질문의 분야가 무엇이든 카드 상징에서 필요한 성질·상태·감정·결과를 자유롭게 추론하고, 어떤 카드 원뜻과 자리 역할에서 나온 판단인지 밝힌다.
 - 결과를 묻는 질문은 카드 배열이 가리키는 한쪽을 첫 문장에서 분명히 말하고, 현실의 불확실성을 이유로 결론을 취소하지 않는다.
 - 숫자는 화면의 AI 해석 지표로만 작성한다. 검사 결과, 실제 통계, 정확한 확률이나 의학적 진단을 받은 것처럼 출처를 꾸며내지 않는다.
-- 제공된 카드 의미 데이터의 범위를 벗어난 의미를 확정적으로 추가하지 않는다.
+- 카드 상징에서 구체적인 추천·예측·판단을 만드는 것은 허용한다. 다만 실제 통계, 검사 결과, 진단, 외부 출처가 확인된 것처럼 꾸며내지 않는다.
 - 열린 추천 요청에서는 카드 공개 전 후보를 만들거나 범위를 임의로 좁히지 않는다. 모든 카드를 해석한 뒤 질문에 맞는 구체적인 답 하나를 처음 제안하고, 카드 의미가 그 답과 어떻게 이어지는지 구체적으로 설명한다.
 - "이 질문에서는", "질문에 따르면", "추천할 수 있는 것은" 같은 메타 문장으로 시작하지 않는다. 사용자가 바로 이해할 수 있는 답부터 쓴다.
 - 반드시 JSON 객체만 출력한다.`;
@@ -568,6 +569,7 @@ async function runAiJson<T>(
 
 function createReadingAiProvider(
   ai: WorkersAIBinding,
+  workersModel: string,
   groqApiKey: string | undefined,
   groqModel: string,
   groqMaxTokens: number,
@@ -582,7 +584,7 @@ function createReadingAiProvider(
 ): AiJsonProvider {
   return createQuotaFallbackAiProvider({
     workersAi: ai,
-    workersModel: WORKERS_AI_MODEL,
+    workersModel,
     groqApiKey,
     groqModel,
     groqMaxTokens,
@@ -644,13 +646,16 @@ candidates에는 2번의 대상만 넣는다. 어떤 대상을 candidates에 넣
 - analysis: 위 유형이 아닌 상태·관계·의미 분석 요청
 
 후속 질문은 현재 문장과 대화 맥락을 함께 읽고, 앞선 후보나 조건을 실제로 이어 묻는 경우에만 상속한다. 현재 질문이 새 범위를 제시하면 현재 질문을 우선한다. recommend_one에는 앞선 후보를 기계적으로 상속하지 않는다.
-answerContract.subject에는 지금 답해야 할 대상과 반드시 지켜야 할 제약을 짧고 구체적으로 보존한다. candidates가 필요 없는 유형은 빈 배열을 쓴다.
+answerContract.subject에는 지금 답해야 할 대상만 짧고 구체적으로 쓴다. candidates가 필요 없는 유형은 빈 배열을 쓴다.
+answerContract.constraints에는 사용자가 명시한 제외·요구·선호 조건만 각각 독립된 문장으로 쓴다. 조건이 없으면 빈 배열이다. 카드나 AI가 추측한 조건을 추가하지 않는다.
+answerContract.answerInstruction에는 현재 질문과 대화 맥락을 합쳐, 최종 해석이 무엇을 어떤 형태로 직접 답해야 하는지 자연어 한 문장으로 쓴다. 복합 요청이면 한 가지 kind에 맞추느라 나머지 요구를 버리지 말고 이 문장에 함께 보존한다.
 
 출력 직전에 다음을 스스로 점검하고, 하나라도 맞지 않으면 JSON을 출력하기 전에 조용히 다시 판단한다.
 - candidates의 각 항목이 지금도 선택 가능한 대안이며, 제외 조건이나 배경 정보가 아니다.
 - choose_one과 compare의 candidates는 사용자가 실제로 제시한 닫힌 후보 집합과 정확히 일치한다.
 - recommend_one에서는 candidates가 비어 있고, subject와 자리 focus에 중요한 제약이 빠지지 않았다.
 - answerContract.kind가 사용자가 최종적으로 요구한 답의 형태와 일치한다.
+- constraints에 사용자가 말하지 않은 조건이 추가되지 않았고, answerInstruction에 답해야 할 요구가 빠지지 않았다.
 
 positions는 질문에 실제로 필요한 서로 다른 역할의 수에 따라 1~5개로 정한다. positions 길이가 사용자가 뽑을 카드 수가 된다. 질문 글자 수나 특정 단어가 아니라, 답을 내는 데 필요한 관점 수를 기준으로 한다. 의미가 겹치는 자리를 수를 늘리기 위해 만들지 않는다.
 choose_one, yes_no, compare도 후보 수에 기계적으로 맞추지 말고, 질문을 제대로 판단하는 데 필요한 역할을 1~5개로 구성한다. 후보별 자리가 필요하다면 사용하되 자리 이름에 후보 문구를 억지로 반복하지 않는다.
@@ -661,11 +666,12 @@ recommend_one은 후보별 자리를 만들지 않는다. 질문에 답하기 �
   "interpretationFrame": "이번 리딩이 분석할 기준",
   "selectionGuide": "카드 선택 안내 한 문장",
   "positions": [{ "id": "고유 영문 ID", "title": "자리 이름", "focus": "이 자리가 살펴볼 관점" }],
-  "answerContract": { "kind": "choose_one|recommend_one|yes_no|outcome|compare|forecast|advice|explain|analysis", "subject": "직접 답할 대상", "candidates": [] }
+  "answerContract": { "kind": "choose_one|recommend_one|yes_no|outcome|compare|forecast|advice|explain|analysis", "subject": "직접 답할 대상", "candidates": [], "constraints": [], "answerInstruction": "최종 해석이 수행할 직접 답변 지시" }
 }
 interpretationFrame은 자리 이름을 다시 나열하지 말고, 이번 리딩에서 무엇을 판단할지 한 문장으로 쓴다.`;
   const provider = createReadingAiProvider(
     ai,
+    WORKERS_PLAN_MODEL,
     groqApiKey,
     GROQ_PLAN_MODEL,
     1_600,
@@ -770,6 +776,7 @@ export async function createAiInterpretation(
       : "추가 질문이 새로운 대상이나 답변 계약을 다루므로 axes는 현재 질문에 맞게 새로 만들고, 이전 label을 억지로 재사용하지 않는다."
     : "";
   const contractGuide = `답변 계약: ${JSON.stringify(contract)}
+- answerInstruction을 최종 답의 우선 지시로 실행하고 constraints를 모두 지킨다. constraints를 선택 후보로 바꾸거나 카드 의미와 무관하게 새 조건을 추가하지 않는다.
 - verdict에는 value와 statement만 출력한다. kind는 서버가 답변 계약에서 보존한다.
 - verdict.value에는 질문에 대한 실제 답만 짧게 쓴다. 질문을 되풀이하거나 판단 기준만 답으로 쓰지 않는다.
 - verdict.statement는 verdict.value를 포함하고, 현재 질문을 보지 않아도 무엇에 대한 답인지 이해되는 자연스러운 한 문장이다.
@@ -801,7 +808,7 @@ ${contractGuide}
   - reasoning.questionConnection: 왜 그 원뜻이 이 질문의 이 자리에 해당하는지 80~200자로 설명한다. 지정된 자리 이름을 자연스럽게 언급하고 그 자리가 살펴보는 초점과 연결되는 논리를 명시한다. 원뜻과 결론 사이를 건너뛰지 않는다.
   - reasoning.decisionImpact: 이 카드가 전체 결론을 지지하는지 반대하는지, 최종 답에 얼마나 강하게 작용하는지를 45~150자로 설명한다. 이미 내린 결론을 조건부로 다시 열지 않는다.
   - evidence는 서버가 위 카드 데이터에서 직접 넣으므로 JSON에 출력하지 않는다.
-- synthesis: 정확히 카드당 한 문장씩 ${expectedCards.length}문장으로 쓴다. 각 문장은 카드 이름으로 시작하고 그 카드가 결론을 뒷받침하는 이유를 질문의 말로 설명한다. 카드를 사람처럼 행동하는 주어로 쓰지 말고, 카드가 어떤 판단의 근거가 되는지 쓴다. 카드 문장 뒤에 전체를 다시 요약하는 결론 문장을 추가하지 않는다.
+- synthesis: 정확히 카드당 한 문장씩 ${expectedCards.length}문장으로 쓴다. 각 문장은 카드 이름으로 시작하고 그 카드가 결론을 지지하거나 반대하거나 주의점을 더하는 방식을 질문의 말로 설명한다. 상충하는 신호를 억지로 같은 방향의 근거로 바꾸지 않는다. 카드를 사람처럼 행동하는 주어로 쓰지 말고, 카드 문장 뒤에 전체 결론을 다시 반복하지 않는다.
 - guidance: 사용자가 실제로 확인하거나 실행할 수 있는 짧은 항목 2~4개. 카드 데이터 문장을 복사하지 않는다. recommend_one에서는 답 자체를 다시 반복하지 말고, 그 답을 고른 카드 근거에서 나온 실행 방법이나 주의점만 쓴다.
 - axes: 질문에 맞는 ${expectedCards.length === 1 ? "정확히 3개" : "3~5개"} 축. 각 항목은 label, score(0~100 정수), evidence(질문에 연결된 한 문장 문자열), evidenceCardIds
 - signals: support, caution, uncertainty 정수이며 합계 100
@@ -825,6 +832,7 @@ ${followupAxesGuide}
 ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 빠뜨리지 않는다.`;
   const provider = createReadingAiProvider(
     ai,
+    WORKERS_INTERPRETATION_MODEL,
     groqApiKey,
     GROQ_INTERPRETATION_MODEL,
     GROQ_INTERPRETATION_MAX_TOKENS,

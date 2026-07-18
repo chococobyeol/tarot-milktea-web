@@ -22,6 +22,8 @@ export const answerContractSchema = z.object({
   kind: answerKindSchema,
   subject: z.string().trim().min(1).max(160),
   candidates: z.array(z.string().trim().min(1).max(80)).max(5),
+  constraints: z.array(z.string().trim().min(1).max(160)).max(8).optional(),
+  answerInstruction: z.string().trim().min(1).max(360).optional(),
 }).superRefine((contract, context) => {
   const candidateKinds = new Set(["choose_one", "yes_no", "compare"]);
   if (!candidateKinds.has(contract.kind) && contract.candidates.length > 0) {

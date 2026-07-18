@@ -56,6 +56,8 @@ export interface AnswerContract {
   kind: AnswerKind;
   subject: string;
   candidates: string[];
+  constraints?: string[];
+  answerInstruction?: string;
 }
 
 export interface ReadingPlan {

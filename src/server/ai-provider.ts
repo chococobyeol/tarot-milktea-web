@@ -147,6 +147,12 @@ export function isWorkersAiDailyLimitError(error: unknown): boolean {
     || /daily[^.]{0,80}(?:neuron|usage|free allocation)[^.]{0,80}(?:limit|exceed|used up)/i.test(details);
 }
 
+function isWorkersAiJsonModeError(error: unknown): boolean {
+  const details = errorDetails(error);
+  return /json mode[^.]{0,100}(?:couldn['’]?t|could not|failed|invalid|unmet)/i.test(details)
+    || /(?:structured|json)[^.]{0,80}(?:generation|output|response)[^.]{0,80}(?:failed|invalid)/i.test(details);
+}
+
 function retryAfterSeconds(response: Response): number | undefined {
   const value = response.headers.get("retry-after")?.trim();
   if (!value) return undefined;
@@ -274,6 +280,7 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
   const strictJsonSchema = options.groqStrictJsonSchema ?? true;
   let activeProvider: AiProviderName = "workers-ai";
   let groqCallCount = 0;
+  let workersFailureCount = 0;
 
   const switchToGroq = (reason: AiFallbackReason, context?: AiRequestContext): boolean => {
     if (!groqApiKey || activeProvider === "groq") return false;
@@ -324,7 +331,8 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
         const requestTimeoutMs = !groqApiKey && request.deadlineAt !== undefined
           ? Math.max(0, request.deadlineAt - Date.now())
           : remainingTimeoutMs(request, workersTimeoutMs);
-        return await withProviderTimeout(
+        const isGptOss = options.workersModel.startsWith("@cf/openai/gpt-oss-");
+        const result = await withProviderTimeout(
           "workers-ai",
           requestTimeoutMs,
           () => options.workersAi.run(options.workersModel, {
@@ -334,14 +342,29 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
             ],
             max_tokens: request.maxTokens,
             temperature: request.temperature,
-            response_format: { type: "json_object" },
-            chat_template_kwargs: { enable_thinking: false },
+            response_format: {
+              type: "json_schema",
+              json_schema: request.jsonSchema.schema,
+            },
+            ...(isGptOss
+              ? { reasoning_effort: "low" }
+              : { chat_template_kwargs: { enable_thinking: false } }),
           }),
         );
+        workersFailureCount = 0;
+        return result;
       } catch (error) {
         const dailyLimit = isWorkersAiDailyLimitError(error);
+        const invalidJsonResponse = !dailyLimit && isWorkersAiJsonModeError(error);
         const providerError = error instanceof AiProviderError ? error : undefined;
-        const kind = dailyLimit ? "daily_limit" : providerError?.kind ?? "unavailable";
+        const kind = dailyLimit
+          ? "daily_limit"
+          : invalidJsonResponse
+            ? "invalid_response"
+            : providerError?.kind ?? "unavailable";
+        if (kind === "invalid_response") {
+          throw new AiProviderError("workers-ai", kind, true);
+        }
         if (!groqApiKey) {
           throw new AiProviderError(
             "workers-ai",
@@ -350,10 +373,13 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
           );
         }
 
-        switchToGroq(
-          dailyLimit ? "daily-limit" : "workers-error",
-          requestContext(request),
-        );
+        workersFailureCount += 1;
+        if (dailyLimit || workersFailureCount >= 2) {
+          switchToGroq(
+            dailyLimit ? "daily-limit" : "workers-error",
+            requestContext(request),
+          );
+        }
         throw new AiProviderError("workers-ai", kind, true);
       }
     },

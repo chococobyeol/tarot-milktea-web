@@ -15,7 +15,7 @@ const answerKinds = [
 const answerContractSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["kind", "subject", "candidates"],
+  required: ["kind", "subject", "candidates", "constraints", "answerInstruction"],
   properties: {
     kind: { type: "string", enum: answerKinds },
     subject: { type: "string", minLength: 1, maxLength: 160 },
@@ -24,6 +24,12 @@ const answerContractSchema = {
       maxItems: 5,
       items: { type: "string", minLength: 1, maxLength: 80 },
     },
+    constraints: {
+      type: "array",
+      maxItems: 8,
+      items: { type: "string", minLength: 1, maxLength: 160 },
+    },
+    answerInstruction: { type: "string", minLength: 1, maxLength: 360 },
   },
 };
 
