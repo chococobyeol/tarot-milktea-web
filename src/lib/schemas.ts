@@ -114,6 +114,13 @@ export const readingResultSchema = z.object({
   }),
 });
 
+export const koreanRegisterEditSchema = z.object({
+  editedFields: z.array(z.object({
+    fieldId: z.string().min(1).max(120),
+    text: z.string().min(1).max(1800),
+  })).min(1).max(40),
+});
+
 const planRequestSchema = z.object({
   action: z.literal("plan"),
   question: z.string().trim().min(4).max(500),

@@ -27,6 +27,7 @@ export interface AiJsonRequest {
   deadlineAt?: number;
   requestId?: string;
   operation?: "plan" | "interpret";
+  isCorrection?: boolean;
 }
 
 interface AiRequestContext {
@@ -36,6 +37,8 @@ interface AiRequestContext {
 
 export interface AiJsonProvider {
   readonly activeProvider: AiProviderName;
+  /** Stable per-backend key used to keep retries for different models separate. */
+  readonly activeBackend: string;
   run(request: AiJsonRequest): Promise<unknown>;
   switchToFallback?(reason: AiFallbackReason, context?: AiRequestContext): boolean;
 }
@@ -74,6 +77,7 @@ export class AiProviderError extends Error {
 interface QuotaFallbackProviderOptions {
   workersAi: WorkersAIBinding;
   workersModel: string;
+  workersFallbackModel?: string;
   groqApiKey?: string;
   groqModel: string;
   groqMaxTokens?: number;
@@ -157,8 +161,11 @@ function retryAfterSeconds(response: Response): number | undefined {
   const value = response.headers.get("retry-after")?.trim();
   if (!value) return undefined;
   const seconds = Number(value);
-  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
-  return Math.ceil(seconds);
+  if (Number.isFinite(seconds) && seconds > 0) return Math.ceil(seconds);
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt)) return undefined;
+  const delayMs = retryAt - Date.now();
+  return delayMs > 0 ? Math.ceil(delayMs / 1_000) : undefined;
 }
 
 interface GroqErrorPayload {
@@ -186,7 +193,7 @@ function groqHttpError(response: Response, payload: GroqErrorPayload | null): Ai
     ),
   };
   if (response.status === 429) {
-    return new AiProviderError("groq", "rate_limit", false, retryAfter, details);
+    return new AiProviderError("groq", "rate_limit", true, retryAfter, details);
   }
   if (response.status === 401 || response.status === 403) {
     return new AiProviderError("groq", "authentication", false, undefined, details);
@@ -278,21 +285,42 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
   const timeoutMs = options.timeoutMs ?? DEFAULT_GROQ_TIMEOUT_MS;
   const workersTimeoutMs = options.workersTimeoutMs ?? timeoutMs;
   const strictJsonSchema = options.groqStrictJsonSchema ?? true;
+  const workersModels = [options.workersModel, options.workersFallbackModel]
+    .filter((model): model is string => Boolean(model))
+    .filter((model, index, models) => models.indexOf(model) === index);
   let activeProvider: AiProviderName = "workers-ai";
-  let groqCallCount = 0;
-  let workersFailureCount = 0;
+  let activeWorkersModelIndex = 0;
+
+  const notifyFallback = (reason: AiFallbackReason, context?: AiRequestContext) => {
+    if (context) options.onFallback?.(reason, context);
+    else options.onFallback?.(reason);
+  };
+
+  const switchToWorkersFallback = (
+    reason: AiFallbackReason,
+    context?: AiRequestContext,
+  ): boolean => {
+    if (activeProvider !== "workers-ai"
+      || activeWorkersModelIndex >= workersModels.length - 1) return false;
+    activeWorkersModelIndex += 1;
+    notifyFallback(reason, context);
+    return true;
+  };
 
   const switchToGroq = (reason: AiFallbackReason, context?: AiRequestContext): boolean => {
     if (!groqApiKey || activeProvider === "groq") return false;
     activeProvider = "groq";
-    groqCallCount = 0;
-    if (context) options.onFallback?.(reason, context);
-    else options.onFallback?.(reason);
+    notifyFallback(reason, context);
     return true;
   };
 
+  const switchToNextBackend = (
+    reason: AiFallbackReason,
+    context?: AiRequestContext,
+  ): boolean => switchToWorkersFallback(reason, context) || switchToGroq(reason, context);
+
   const runConfiguredGroq = (request: AiJsonRequest) => {
-    const useCorrectionModel = groqCallCount > 0 && Boolean(options.groqCorrectionModel);
+    const useCorrectionModel = Boolean(request.isCorrection && options.groqCorrectionModel);
     const model = useCorrectionModel ? options.groqCorrectionModel as string : options.groqModel;
     const maxTokens = useCorrectionModel
       ? options.groqCorrectionMaxTokens ?? request.maxTokens
@@ -304,7 +332,6 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
     if (requestTimeoutMs <= 0) {
       throw new AiProviderError("groq", "timeout", true);
     }
-    groqCallCount += 1;
     return runGroqJson(
       groqApiKey as string,
       model,
@@ -319,8 +346,13 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
     get activeProvider() {
       return activeProvider;
     },
+    get activeBackend() {
+      return activeProvider === "workers-ai"
+        ? `workers-ai:${workersModels[activeWorkersModelIndex]}`
+        : `groq:${options.groqModel}`;
+    },
     switchToFallback(reason, context) {
-      return switchToGroq(reason, context);
+      return switchToNextBackend(reason, context);
     },
     async run(request) {
       if (activeProvider === "groq") {
@@ -328,14 +360,17 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
       }
 
       try {
-        const requestTimeoutMs = !groqApiKey && request.deadlineAt !== undefined
+        const workersModel = workersModels[activeWorkersModelIndex];
+        const hasNextBackend = activeWorkersModelIndex < workersModels.length - 1
+          || Boolean(groqApiKey);
+        const requestTimeoutMs = !hasNextBackend && request.deadlineAt !== undefined
           ? Math.max(0, request.deadlineAt - Date.now())
           : remainingTimeoutMs(request, workersTimeoutMs);
-        const isGptOss = options.workersModel.startsWith("@cf/openai/gpt-oss-");
+        const isGptOss = workersModel.startsWith("@cf/openai/gpt-oss-");
         const result = await withProviderTimeout(
           "workers-ai",
           requestTimeoutMs,
-          () => options.workersAi.run(options.workersModel, {
+          () => options.workersAi.run(workersModel, {
             messages: [
               { role: "system", content: request.systemPrompt },
               { role: "user", content: request.userPrompt },
@@ -351,7 +386,6 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
               : { chat_template_kwargs: { enable_thinking: false } }),
           }),
         );
-        workersFailureCount = 0;
         return result;
       } catch (error) {
         const dailyLimit = isWorkersAiDailyLimitError(error);
@@ -362,25 +396,12 @@ export function createQuotaFallbackAiProvider(options: QuotaFallbackProviderOpti
           : invalidJsonResponse
             ? "invalid_response"
             : providerError?.kind ?? "unavailable";
-        if (kind === "invalid_response") {
-          throw new AiProviderError("workers-ai", kind, true);
-        }
-        if (!groqApiKey) {
-          throw new AiProviderError(
-            "workers-ai",
-            kind,
-            !dailyLimit && kind !== "timeout",
-          );
-        }
-
-        workersFailureCount += 1;
-        if (dailyLimit || workersFailureCount >= 2) {
-          switchToGroq(
-            dailyLimit ? "daily-limit" : "workers-error",
-            requestContext(request),
-          );
-        }
-        throw new AiProviderError("workers-ai", kind, true);
+        const context = requestContext(request);
+        const switched = dailyLimit
+          ? switchToGroq("daily-limit", context)
+          : switchToNextBackend("workers-error", context);
+        const retryable = switched || (!dailyLimit && kind !== "timeout");
+        throw new AiProviderError("workers-ai", kind, retryable);
       }
     },
   };

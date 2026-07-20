@@ -307,7 +307,7 @@ describe("quota fallback AI provider", () => {
       retryable: true,
     });
     await provider.run(request);
-    await provider.run(request);
+    await provider.run({ ...request, isCorrection: true });
 
     expect(workersRun).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -355,11 +355,16 @@ describe("quota fallback AI provider", () => {
     expect(body.model).toBe("openai/gpt-oss-120b");
   });
 
-  it("retries Workers once before using Groq for generic Cloudflare failures", async () => {
+  it("moves a generic Workers failure to the smaller Workers model before Groq", async () => {
     const fetcher = vi.fn(async () => groqSuccess()) as unknown as typeof fetch;
+    const workersRun = vi.fn(async (model: string) => {
+      if (model === "workers-primary") throw new Error("429: temporary request rate limit");
+      return { response: JSON.stringify({ value: "fallback-workers" }) };
+    });
     const provider = createQuotaFallbackAiProvider({
-      workersAi: workersBinding(async () => { throw new Error("429: temporary request rate limit"); }),
-      workersModel: "workers-model",
+      workersAi: workersBinding(workersRun),
+      workersModel: "workers-primary",
+      workersFallbackModel: "workers-fallback",
       groqApiKey: "test-key",
       groqModel: "openai/gpt-oss-120b",
       fetcher,
@@ -371,13 +376,92 @@ describe("quota fallback AI provider", () => {
       retryable: true,
     });
     expect(provider.activeProvider).toBe("workers-ai");
-    await expect(provider.run(request)).rejects.toMatchObject({
-      provider: "workers-ai",
-      kind: "unavailable",
-      retryable: true,
-    });
     await expect(provider.run(request)).resolves.toEqual(expect.any(Object));
+    expect(provider.activeBackend).toBe("workers-ai:workers-fallback");
+    expect(workersRun.mock.calls.map(([model]) => model)).toEqual([
+      "workers-primary",
+      "workers-fallback",
+    ]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("still reserves time for the smaller Workers model when Groq is not configured", async () => {
+    vi.useFakeTimers();
+    try {
+      const workersRun = vi.fn((model: string) => (
+        model === "workers-primary"
+          ? new Promise<unknown>(() => undefined)
+          : Promise.resolve({ response: JSON.stringify({ value: "fallback-workers" }) })
+      ));
+      const provider = createQuotaFallbackAiProvider({
+        workersAi: workersBinding(workersRun),
+        workersModel: "workers-primary",
+        workersFallbackModel: "workers-fallback",
+        groqModel: "openai/gpt-oss-120b",
+        workersTimeoutMs: 1_000,
+      });
+      const timedOutPrimary = provider.run({ ...request, deadlineAt: Date.now() + 5_000 });
+      const rejection = expect(timedOutPrimary).rejects.toMatchObject({
+        provider: "workers-ai",
+        kind: "timeout",
+        retryable: true,
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await rejection;
+
+      expect(provider.activeBackend).toBe("workers-ai:workers-fallback");
+      await expect(provider.run({ ...request, deadlineAt: Date.now() + 4_000 }))
+        .resolves.toEqual(expect.any(Object));
+      expect(workersRun.mock.calls.map(([model]) => model)).toEqual([
+        "workers-primary",
+        "workers-fallback",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses Groq after both Workers models have a transient failure", async () => {
+    const workersRun = vi.fn(async () => {
+      throw new Error("503: temporary capacity failure");
+    });
+    const fetcher = vi.fn(async () => groqSuccess()) as unknown as typeof fetch;
+    const provider = createQuotaFallbackAiProvider({
+      workersAi: workersBinding(workersRun),
+      workersModel: "workers-primary",
+      workersFallbackModel: "workers-fallback",
+      groqApiKey: "test-key",
+      groqModel: "openai/gpt-oss-120b",
+      fetcher,
+    });
+
+    await expect(provider.run(request)).rejects.toMatchObject({ provider: "workers-ai" });
+    expect(provider.activeBackend).toBe("workers-ai:workers-fallback");
+    await expect(provider.run(request)).rejects.toMatchObject({ provider: "workers-ai" });
     expect(provider.activeProvider).toBe("groq");
+    await expect(provider.run(request)).resolves.toEqual(expect.any(Object));
+    expect(workersRun).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the smaller Workers model when the shared daily quota is exhausted", async () => {
+    const workersRun = vi.fn(async () => {
+      throw new Error("4006: daily free allocation exhausted");
+    });
+    const fetcher = vi.fn(async () => groqSuccess()) as unknown as typeof fetch;
+    const provider = createQuotaFallbackAiProvider({
+      workersAi: workersBinding(workersRun),
+      workersModel: "workers-primary",
+      workersFallbackModel: "workers-fallback",
+      groqApiKey: "test-key",
+      groqModel: "openai/gpt-oss-120b",
+      fetcher,
+    });
+
+    await expect(provider.run(request)).rejects.toMatchObject({ kind: "daily_limit" });
+    expect(provider.activeProvider).toBe("groq");
+    await provider.run(request);
+    expect(workersRun).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -447,7 +531,7 @@ describe("quota fallback AI provider", () => {
     });
   });
 
-  it("does not retry a Groq rate limit and preserves Retry-After", async () => {
+  it("marks a Groq rate limit retryable and preserves Retry-After", async () => {
     const fetcher = vi.fn(async () => new Response(
       JSON.stringify({ error: { message: "limited" } }),
       { status: 429, headers: { "content-type": "application/json", "retry-after": "7" } },
@@ -470,7 +554,7 @@ describe("quota fallback AI provider", () => {
     await expect(provider.run(request)).rejects.toMatchObject({
       provider: "groq",
       kind: "rate_limit",
-      retryable: false,
+      retryable: true,
       retryAfter: 7,
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -515,7 +599,7 @@ describe("quota fallback AI provider", () => {
     });
     expect((error as Error).message).not.toContain(privateUpstreamBody);
 
-    await expect(provider.run(request)).resolves.toEqual(expect.any(Object));
+    await expect(provider.run({ ...request, isCorrection: true })).resolves.toEqual(expect.any(Object));
     const [, correctionInit] = (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls[1] as [string, RequestInit];
     const correctionBody = JSON.parse(String(correctionInit.body)) as Record<string, unknown>;
     expect(correctionBody.model).toBe("openai/gpt-oss-20b");

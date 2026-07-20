@@ -64,11 +64,13 @@ describe("AI-owned planning", () => {
     const request = workersRun.mock.calls[0][1] as { messages: Array<{ content: string }> };
     expect(request.messages[0].content).toContain("리딩 계획 엔진");
     expect(request.messages[0].content).toContain("언급되었다는 이유만으로 선택 후보로 취급하지 않는다");
+    expect(request.messages[0].content).toContain("해요체");
     expect(request.messages[0].content).not.toContain("카드 원뜻");
     expect(request.messages[1].content).toContain("닫힌 후보 집합");
     expect(request.messages[1].content).toContain("제외하거나 거절한 대상");
     expect(request.messages[1].content).toContain("과거 사건");
     expect(request.messages[1].content).toContain("X는 제외하고 하나를 추천해 달라");
+    expect(request.messages[1].content).toContain("완전한 문장인 사용자 표시 값");
   });
 
   it("returns a semantic validation failure to the same planner before using Groq", async () => {
@@ -111,7 +113,7 @@ describe("AI-owned planning", () => {
     expect(retry.messages[1].content).toContain("검증에서 거절된 이전 JSON 출력");
   });
 
-  it("uses Groq only after Workers rejects three outputs", async () => {
+  it("uses Groq only after both Workers models reject an output and its correction", async () => {
     const invalid = aiPlan(2);
     invalid.answerContract = {
       kind: "choose_one",
@@ -140,7 +142,7 @@ describe("AI-owned planning", () => {
     );
 
     expect(plan.answerContract.kind).toBe("recommend_one");
-    expect(workersRun).toHaveBeenCalledTimes(3);
+    expect(workersRun).toHaveBeenCalledTimes(4);
     expect(groqFetch).toHaveBeenCalledTimes(1);
     const [, groqInit] = groqFetch.mock.calls[0] as unknown as [string, RequestInit];
     const groqBody = JSON.parse(String(groqInit.body)) as {
@@ -152,7 +154,7 @@ describe("AI-owned planning", () => {
     expect(groqBody.messages[1].content).toContain("AI가 만든 후보");
   });
 
-  it("feeds each rejected Groq output back until its third output succeeds", async () => {
+  it("feeds a rejected Groq output back once before accepting its correction", async () => {
     const invalid = aiPlan(2);
     invalid.answerContract = {
       kind: "choose_one",
@@ -171,9 +173,6 @@ describe("AI-owned planning", () => {
         choices: [{ message: { content: JSON.stringify(invalid) } }],
       }))
       .mockResolvedValueOnce(Response.json({
-        choices: [{ message: { content: JSON.stringify(invalid) } }],
-      }))
-      .mockResolvedValueOnce(Response.json({
         choices: [{ message: { content: JSON.stringify(corrected) } }],
       }));
     vi.stubGlobal("fetch", groqFetch);
@@ -188,15 +187,13 @@ describe("AI-owned planning", () => {
     );
 
     expect(plan.answerContract.kind).toBe("recommend_one");
-    expect(workersRun).toHaveBeenCalledTimes(3);
-    expect(groqFetch).toHaveBeenCalledTimes(3);
-    for (const callIndex of [1, 2]) {
-      const [, init] = groqFetch.mock.calls[callIndex] as unknown as [string, RequestInit];
-      const body = JSON.parse(String(init.body)) as { messages: Array<{ content: string }> };
-      expect(body.messages[1].content).toContain("이전 출력 검증 결과");
-      expect(body.messages[1].content).toContain("AI가 만든 후보");
-      expect(body.messages[1].content).toContain("검증에서 거절된 이전 JSON 출력");
-    }
+    expect(workersRun).toHaveBeenCalledTimes(4);
+    expect(groqFetch).toHaveBeenCalledTimes(2);
+    const [, init] = groqFetch.mock.calls[1] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as { messages: Array<{ content: string }> };
+    expect(body.messages[1].content).toContain("이전 출력 검증 결과");
+    expect(body.messages[1].content).toContain("AI가 만든 후보");
+    expect(body.messages[1].content).toContain("검증에서 거절된 이전 JSON 출력");
   });
 
   it("retries a Groq JSON-generation rejection with explicit correction feedback", async () => {
@@ -266,7 +263,7 @@ describe("AI-owned planning", () => {
     expect(groqFetch).toHaveBeenCalledTimes(2);
   });
 
-  it("returns 502 instead of 503 after both providers reject three outputs", async () => {
+  it("returns 502 instead of 503 after all backends reject their correction", async () => {
     const invalid = aiPlan(2);
     invalid.answerContract = {
       kind: "choose_one",
@@ -291,8 +288,8 @@ describe("AI-owned planning", () => {
       code: "INVALID_AI_RESPONSE",
     });
 
-    expect(workersRun).toHaveBeenCalledTimes(3);
-    expect(groqFetch).toHaveBeenCalledTimes(3);
+    expect(workersRun).toHaveBeenCalledTimes(4);
+    expect(groqFetch).toHaveBeenCalledTimes(2);
   });
 
   it("derives four cards from the AI-selected roles for a short question", async () => {
@@ -423,8 +420,7 @@ describe("generic interpretation", () => {
       subject: "새 캐릭터 이름 하나",
       candidates: [],
     };
-    const workersRun = vi.fn(async () => ({
-      response: JSON.stringify({
+    const readingPayload = {
         verdict: { value: "루미", statement: "새 캐릭터 이름은 루미가 좋아요." },
         summary: "별 카드의 밝은 이미지가 기억하기 쉬운 이름과 이어져요.",
         cardInterpretations: [{
@@ -446,7 +442,24 @@ describe("generic interpretation", () => {
           { label: "결론 선명도", score: 70, evidence: "카드 신호가 한 이름으로 모여요.", evidenceCardIds: ["major-17"] },
         ],
         signals: { support: 62, caution: 18, uncertainty: 20 },
-      }),
+    };
+    const editedFields = [
+      { fieldId: "verdict.statement", text: readingPayload.verdict.statement },
+      { fieldId: "summary", text: readingPayload.summary },
+      { fieldId: "cardInterpretations.0.text", text: readingPayload.cardInterpretations[0].text },
+      { fieldId: "cardInterpretations.0.reasoning.sourceMeaning", text: readingPayload.cardInterpretations[0].reasoning.sourceMeaning },
+      { fieldId: "cardInterpretations.0.reasoning.questionConnection", text: readingPayload.cardInterpretations[0].reasoning.questionConnection },
+      { fieldId: "cardInterpretations.0.reasoning.decisionImpact", text: readingPayload.cardInterpretations[0].reasoning.decisionImpact },
+      { fieldId: "synthesis", text: readingPayload.synthesis },
+      { fieldId: "guidance.0", text: readingPayload.guidance[0] },
+      { fieldId: "axes.0.evidence", text: readingPayload.axes[0].evidence },
+      { fieldId: "axes.1.evidence", text: readingPayload.axes[1].evidence },
+      { fieldId: "axes.2.evidence", text: readingPayload.axes[2].evidence },
+    ];
+    const workersRun = vi.fn(async (model: string) => ({
+      response: JSON.stringify(model === "@cf/openai/gpt-oss-20b"
+        ? { editedFields }
+        : readingPayload),
     }));
 
     const result = await createAiInterpretation(
@@ -467,7 +480,84 @@ describe("generic interpretation", () => {
 
     expect(result.verdict?.statement).toBe("새 캐릭터 이름은 루미가 좋아요.");
     expect(result.verdict?.kind).toBe("recommend_one");
-    expect(workersRun).toHaveBeenCalledTimes(1);
+    expect(workersRun).toHaveBeenCalledTimes(2);
+    expect(workersRun.mock.calls.map(([model]) => model)).toEqual([
+      "@cf/openai/gpt-oss-120b",
+      "@cf/openai/gpt-oss-20b",
+    ]);
+  });
+
+  it("lets a general AI editor rewrite Korean display sentences without topic parsing", async () => {
+    const contract: AnswerContract = {
+      kind: "yes_no",
+      subject: "아침에 파스타를 먹을지",
+      candidates: ["예", "아니요"],
+    };
+    const readingPayload = {
+      verdict: { value: "아니요", statement: "오늘 아침에는 파스타를 피하는 것이 좋습니다." },
+      summary: "소드 8의 제약이 무거운 선택을 제한적으로 보게 합니다.",
+      cardInterpretations: [{
+        cardId: "major-17",
+        positionTitle: "결정 요인",
+        orientation: "upright",
+        text: "현재 제약이 크게 작용하므로 피하는 것이 좋습니다.",
+        reasoning: {
+          sourceMeaning: "별 정방향은 희망과 앞으로 나아갈 가능성을 뜻합니다.",
+          questionConnection: "결정 요인 자리에서는 현재의 선택 폭을 다시 살펴보게 합니다.",
+          decisionImpact: "이 신호는 지금 먹지 않는 결론을 강하게 지지합니다.",
+        },
+      }],
+      synthesis: "별 카드는 지금보다 가벼운 선택을 찾는 근거가 됩니다.",
+      guidance: ["다른 아침 메뉴를 선택하십시오."],
+      axes: [
+        { label: "부담", score: 78, evidence: "현재 제약이 선택의 부담을 높입니다.", evidenceCardIds: ["major-17"] },
+        { label: "실행성", score: 36, evidence: "바로 실행하기에는 흐름이 무겁습니다.", evidenceCardIds: ["major-17"] },
+        { label: "결론 선명도", score: 73, evidence: "카드 신호가 피하는 쪽으로 모입니다.", evidenceCardIds: ["major-17"] },
+      ],
+      signals: { support: 22, caution: 58, uncertainty: 20 },
+    };
+    const editedFields = [
+      { fieldId: "verdict.statement", text: "오늘 아침에는 파스타를 피하는 것이 좋아요." },
+      { fieldId: "summary", text: "소드 8의 제약이 무거운 선택을 제한적으로 보게 해요." },
+      { fieldId: "cardInterpretations.0.text", text: "현재 제약이 크게 작용하므로 피하는 것이 좋아요." },
+      { fieldId: "cardInterpretations.0.reasoning.sourceMeaning", text: "별 정방향은 희망과 앞으로 나아갈 가능성을 뜻해요." },
+      { fieldId: "cardInterpretations.0.reasoning.questionConnection", text: "결정 요인 자리에서는 현재의 선택 폭을 다시 살펴보게 해요." },
+      { fieldId: "cardInterpretations.0.reasoning.decisionImpact", text: "이 신호는 지금 먹지 않는 결론을 강하게 지지해요." },
+      { fieldId: "synthesis", text: "별 카드는 지금보다 가벼운 선택을 찾는 근거가 돼요." },
+      { fieldId: "guidance.0", text: "다른 아침 메뉴를 선택하세요." },
+      { fieldId: "axes.0.evidence", text: "현재 제약이 선택의 부담을 높여요." },
+      { fieldId: "axes.1.evidence", text: "바로 실행하기에는 흐름이 무거워요." },
+      { fieldId: "axes.2.evidence", text: "카드 신호가 피하는 쪽으로 모여요." },
+    ];
+    const workersRun = vi.fn(async (model: string) => ({
+      response: JSON.stringify(model === "@cf/openai/gpt-oss-20b"
+        ? { editedFields }
+        : readingPayload),
+    }));
+
+    const result = await createAiInterpretation(
+      { run: workersRun },
+      "아침에 청양 들기름 파스타 먹을까?",
+      [{
+        cardId: "major-17",
+        reversed: false,
+        positionId: "decision",
+        positionTitle: "결정 요인",
+        positionFocus: "지금 선택을 지지하는 핵심 신호",
+        round: 0,
+      }],
+      undefined,
+      "ko",
+      contract,
+    );
+
+    expect(result.verdict?.statement).toBe("오늘 아침에는 파스타를 피하는 것이 좋아요.");
+    expect(result.summary).toBe("소드 8의 제약이 무거운 선택을 제한적으로 보게 해요.");
+    expect(result.guidance[0]).toBe("다른 아침 메뉴를 선택하세요.");
+    const editorRequest = workersRun.mock.calls[1][1] as { messages: Array<{ content: string }> };
+    expect(editorRequest.messages[0].content).toContain("한국어 문체 검토·편집기");
+    expect(editorRequest.messages[1].content).toContain("fieldId");
+    expect(editorRequest.messages[1].content).not.toContain("음식에는");
   });
 
   it("keeps waiting past 60 seconds but ends at the reserved AI deadline before the client deadline", async () => {
@@ -508,7 +598,11 @@ describe("generic interpretation", () => {
       await vi.advanceTimersByTimeAsync(1);
       await rejection;
       expect(settled).toBe(true);
-      expect(neverResponds).toHaveBeenCalledTimes(1);
+      expect(neverResponds).toHaveBeenCalledTimes(2);
+      expect(neverResponds.mock.calls.map(([model]) => model)).toEqual([
+        "@cf/openai/gpt-oss-120b",
+        "@cf/openai/gpt-oss-20b",
+      ]);
     } finally {
       warn.mockRestore();
       error.mockRestore();
