@@ -17,26 +17,51 @@ export interface ExpectedInterpretation {
   evidence: string[];
 }
 
-export interface KoreanDisplayField {
+export interface KoreanDisplaySentence {
   path: string;
   text: string;
 }
 
+export class KoreanRegisterValidationError<T> extends Error {
+  readonly code = "KOREAN_REGISTER";
+
+  constructor(
+    message: string,
+    readonly fallbackValue: T,
+    readonly invalidPaths: string[],
+  ) {
+    super(message);
+    this.name = "KoreanRegisterValidationError";
+  }
+}
+
 // This validator never rewrites an answer or tries to understand its topic. It
-// only rejects Korean display sentences whose final speech level is visibly
-// different from the app's requested 해요체, so the AI can correct its own JSON.
-const NON_HAEYO_SENTENCE_ENDING = /(?:습니다|습니까|니다|니까|십시오|[가-힣](?:다|라|자|냐)|[가-힣](?:는가|인가))(?=(?:[.!?…]+(?:\s|$)|$))/u;
+// only rejects complete Korean display sentences that do not end in the app's
+// requested 해요체, so the AI can correct its own JSON.
+function hasNonHaeyoSentence(text: string): boolean {
+  const clauses = text
+    .split(/[.!?…]+(?=\s|$)|\n+/u)
+    .map((clause) => clause.trim().replace(/["'”’）)\]]+$/u, "").trim())
+    .filter(Boolean);
+  return clauses.some((clause) => /[가-힣]/u.test(clause) && !/[요죠]$/u.test(clause));
+}
 
 export function enforceKoreanHaeyoRegister<T>(
   value: T,
-  fields: KoreanDisplayField[],
+  fields: KoreanDisplaySentence[],
 ): T {
   const invalidPaths = fields
-    .filter(({ text }) => NON_HAEYO_SENTENCE_ENDING.test(text.trim()))
+    .filter(({ text }) => hasNonHaeyoSentence(text))
     .map(({ path }) => path);
   if (invalidPaths.length > 0) {
-    throw new Error(
-      `다음 사용자 표시 필드에 하다체나 하십시오체 문장이 남아 있어요: ${invalidPaths.slice(0, 12).join(", ")}. 내용, 결론, 강도와 수치는 바꾸지 말고 해당 문장만 자연스러운 해요체로 다시 써요.`,
+    const shownPaths = invalidPaths.slice(0, 8).join(", ");
+    const omitted = invalidPaths.length > 8
+      ? ` 외 ${invalidPaths.length - 8}개`
+      : "";
+    throw new KoreanRegisterValidationError(
+      `한국어 사용자 표시 문장 ${invalidPaths.length}개가 자연스러운 해요체로 끝나지 않아요: ${shownPaths}${omitted}. 내용, 결론, 강도와 수치는 바꾸지 말고, 열거한 필드뿐 아니라 모든 사용자 표시 문장을 다시 확인해 완전한 문장은 전부 해요체로 써요.`,
+      value,
+      invalidPaths,
     );
   }
   return value;

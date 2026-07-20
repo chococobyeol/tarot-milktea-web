@@ -566,6 +566,114 @@ describe("generic interpretation", () => {
     expect(correctionRequest.messages[1].content).not.toContain("음식에는");
   });
 
+  it("returns the valid reading instead of failing when only the register remains wrong", async () => {
+    const contract: AnswerContract = {
+      kind: "yes_no",
+      subject: "지금 실행할지",
+      candidates: ["예", "아니요"],
+    };
+    const formalPayload = {
+      verdict: { value: "예", statement: "지금 실행하는 것이 좋습니다." },
+      summary: "전차의 추진력이 실행 쪽에 무게를 더합니다.",
+      cardInterpretations: [{
+        cardId: "major-07",
+        positionTitle: "결정 요인",
+        orientation: "upright",
+        text: "정한 방향으로 움직이는 힘이 강합니다.",
+        reasoning: {
+          sourceMeaning: "전차 정방향은 추진력과 전진을 뜻합니다.",
+          questionConnection: "결정 요인 자리에서 추진력이 실행과 연결됩니다.",
+          decisionImpact: "이 신호는 실행하는 결론을 지지합니다.",
+        },
+      }],
+      synthesis: "전차가 망설임보다 실행을 우선하게 합니다.",
+      guidance: ["첫 행동을 바로 시작하십시오."],
+      axes: [
+        { label: "실행", score: 74, evidence: "전차가 행동을 지지합니다.", evidenceCardIds: ["major-07"] },
+        { label: "주의", score: 30, evidence: "속도 조절은 필요합니다.", evidenceCardIds: ["major-07"] },
+        { label: "선명도", score: 70, evidence: "신호가 실행 쪽으로 모입니다.", evidenceCardIds: ["major-07"] },
+      ],
+      signals: { support: 64, caution: 20, uncertainty: 16 },
+    };
+    const workersRun = vi.fn(async () => ({ response: JSON.stringify(formalPayload) }));
+
+    const result = await createAiInterpretation(
+      { run: workersRun },
+      "지금 실행할까?",
+      [{
+        cardId: "major-07",
+        reversed: false,
+        positionId: "decision",
+        positionTitle: "결정 요인",
+        positionFocus: "실행 여부를 가르는 신호",
+        round: 0,
+      }],
+      undefined,
+      "ko",
+      contract,
+    );
+
+    expect(result.verdict?.statement).toBe(formalPayload.verdict.statement);
+    expect(workersRun).toHaveBeenCalledTimes(2);
+    expect(workersRun.mock.calls.map(([model]) => model)).toEqual([
+      "@cf/openai/gpt-oss-120b",
+      "@cf/openai/gpt-oss-120b",
+    ]);
+  });
+
+  it("keeps the valid register candidate when its one correction hits a provider failure", async () => {
+    const contract: AnswerContract = {
+      kind: "yes_no",
+      subject: "지금 실행할지",
+      candidates: ["예", "아니요"],
+    };
+    const formalPayload = {
+      verdict: { value: "예", statement: "지금 실행하는 것이 좋습니다." },
+      summary: "전차의 추진력이 실행 쪽에 무게를 더합니다.",
+      cardInterpretations: [{
+        cardId: "major-07",
+        positionTitle: "결정 요인",
+        orientation: "upright",
+        text: "정한 방향으로 움직이는 힘이 강합니다.",
+        reasoning: {
+          sourceMeaning: "전차 정방향은 추진력과 전진을 뜻합니다.",
+          questionConnection: "결정 요인 자리에서 추진력이 실행과 연결됩니다.",
+          decisionImpact: "이 신호는 실행하는 결론을 지지합니다.",
+        },
+      }],
+      synthesis: "전차가 망설임보다 실행을 우선하게 합니다.",
+      guidance: ["첫 행동을 바로 시작하십시오."],
+      axes: [
+        { label: "실행", score: 74, evidence: "전차가 행동을 지지합니다.", evidenceCardIds: ["major-07"] },
+        { label: "주의", score: 30, evidence: "속도 조절은 필요합니다.", evidenceCardIds: ["major-07"] },
+        { label: "선명도", score: 70, evidence: "신호가 실행 쪽으로 모입니다.", evidenceCardIds: ["major-07"] },
+      ],
+      signals: { support: 64, caution: 20, uncertainty: 16 },
+    };
+    const workersRun = vi.fn()
+      .mockResolvedValueOnce({ response: JSON.stringify(formalPayload) })
+      .mockRejectedValueOnce(new Error("temporary provider failure"));
+
+    const result = await createAiInterpretation(
+      { run: workersRun },
+      "지금 실행할까?",
+      [{
+        cardId: "major-07",
+        reversed: false,
+        positionId: "decision",
+        positionTitle: "결정 요인",
+        positionFocus: "실행 여부를 가르는 신호",
+        round: 0,
+      }],
+      undefined,
+      "ko",
+      contract,
+    );
+
+    expect(result.verdict?.statement).toBe(formalPayload.verdict.statement);
+    expect(workersRun).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps waiting past 60 seconds but ends at the reserved AI deadline before the client deadline", async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);

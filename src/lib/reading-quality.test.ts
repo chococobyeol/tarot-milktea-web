@@ -209,10 +209,21 @@ describe("domain-neutral interpretation validation", () => {
 
 describe("Korean display register validation", () => {
   it("accepts natural haeyo sentences without changing them", () => {
-    const result = { summary: "지금은 실행하는 쪽이 좋아요." };
+    const result = { summary: "신호는 70.5% 정도로 읽혀요. 지금은 실행하는 쪽이 좋아요." };
     expect(enforceKoreanHaeyoRegister(result, [
       { path: "summary", text: result.summary },
     ])).toBe(result);
+  });
+
+  it.each([
+    "이쪽이 더 자연스럽죠.",
+    "가능성은 1.5배 정도로 보여요.",
+    "추천 모델은 GPT-5.2예요.",
+    "“지금 시작하자.”는 신호로 보여요.",
+  ])("accepts a natural haeyo sentence without punctuation false positives: %s", (text) => {
+    expect(enforceKoreanHaeyoRegister(text, [
+      { path: "summary", text },
+    ])).toBe(text);
   });
 
   it.each([
@@ -221,16 +232,20 @@ describe("Korean display register validation", () => {
     "지금은 실행하라.",
     "지금은 함께 시작하자.",
     "다른 선택을 확인하십시오.",
+    "다른 메뉴 선택 권장.",
+    "지금은 보류할 것.",
+    "이쪽이 나을까?",
   ])("rejects a non-haeyo display sentence so the AI can retry: %s", (text) => {
     expect(() => enforceKoreanHaeyoRegister({}, [
       { path: "summary", text },
     ])).toThrow(/자연스러운 해요체/);
   });
 
-  it("does not reject labels and noun phrases", () => {
-    expect(enforceKoreanHaeyoRegister("same", [
-      { path: "position.title", text: "현재 흐름" },
-      { path: "answerContract.subject", text: "두 선택 중 하나" },
-    ])).toBe("same");
+  it("reports omitted fields and asks the AI to review every display sentence", () => {
+    const fields = Array.from({ length: 12 }, (_, index) => ({
+      path: `guidance.${index}`,
+      text: "선택 권장.",
+    }));
+    expect(() => enforceKoreanHaeyoRegister({}, fields)).toThrow(/외 4개.*모든 사용자 표시 문장/);
   });
 });

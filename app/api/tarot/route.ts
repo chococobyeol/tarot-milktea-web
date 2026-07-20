@@ -13,7 +13,8 @@ import {
   enforceKoreanHaeyoRegister,
   enforcePlanQuality,
   enforceReadingQuality,
-  type KoreanDisplayField,
+  KoreanRegisterValidationError,
+  type KoreanDisplaySentence,
   type ExpectedInterpretation,
 } from "@/src/lib/reading-quality";
 import {
@@ -251,7 +252,14 @@ function normalizeReadingShape(
 
 type AiOperation = "plan" | "interpret";
 
-function validationDiagnostics(error: unknown): { validationCodes?: string[] } {
+function validationDiagnostics(error: unknown): Record<string, unknown> {
+  if (error instanceof KoreanRegisterValidationError) {
+    return {
+      validationCode: error.code,
+      invalidFieldCount: error.invalidPaths.length,
+      invalidFields: error.invalidPaths.slice(0, 8),
+    };
+  }
   if (!error || typeof error !== "object" || !("issues" in error)) return {};
   const issues = (error as { issues?: unknown }).issues;
   if (!Array.isArray(issues)) return {};
@@ -312,6 +320,7 @@ function correctionFeedback(error: unknown): string {
 }
 
 function isCorrectableOutputFailure(error: unknown, responseText?: string): boolean {
+  if (error instanceof KoreanRegisterValidationError) return true;
   if (error instanceof AiProviderError) return error.kind === "invalid_response";
   if (error instanceof SyntaxError) return true;
   if (error instanceof ApiError) return error.code === "AI_RESPONSE_EMPTY";
@@ -448,6 +457,7 @@ async function runAiJson<T>(
   let correction: { feedback: string; rejectedOutput?: string } | undefined;
   const outputFailureCounts = new Map<string, number>();
   const transientFailureCounts = new Map<string, number>();
+  let degradedRegisterCandidate: T | undefined;
   let deadlineReached = false;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const remainingMs = deadlineAt - Date.now();
@@ -460,6 +470,7 @@ async function runAiJson<T>(
     const attemptStartedAt = Date.now();
     const attemptProvider = provider.activeProvider;
     const attemptBackend = provider.activeBackend;
+    const registerCandidateBeforeAttempt = degradedRegisterCandidate;
     try {
       const userPrompt = correction
         ? correctionPrompt(prompt, correction.feedback, correction.rejectedOutput)
@@ -492,6 +503,9 @@ async function runAiJson<T>(
       return validated;
     } catch (error) {
       lastError = error;
+      if (error instanceof KoreanRegisterValidationError) {
+        degradedRegisterCandidate = error.fallbackValue as T;
+      }
       const outputFailure = isCorrectableOutputFailure(error, responseText);
       let outputFailureCount = 0;
       if (outputFailure) {
@@ -519,12 +533,36 @@ async function runAiJson<T>(
         ...validationDiagnostics(error),
         ...providerDiagnostics(error),
       });
+      if (registerCandidateBeforeAttempt !== undefined) {
+        console.warn("[tarot-ai] register correction failed; returning valid candidate", {
+          requestId,
+          operation,
+          provider: provider.activeProvider,
+          backend: provider.activeBackend,
+          correctionCategory: classifyAiFailure(error),
+          totalElapsedMs: Date.now() - startedAt,
+        });
+        return degradedRegisterCandidate !== undefined
+          ? degradedRegisterCandidate
+          : registerCandidateBeforeAttempt;
+      }
       if (deadlineAt - Date.now() < MIN_RETRY_BUDGET_MS) {
         deadlineReached = true;
         break;
       }
       if (outputFailure) {
         if (outputFailureCount >= MAX_OUTPUT_FAILURES_PER_PROVIDER) {
+          if (error instanceof KoreanRegisterValidationError && degradedRegisterCandidate !== undefined) {
+            console.warn("[tarot-ai] returning structurally valid register fallback", {
+              requestId,
+              operation,
+              provider: provider.activeProvider,
+              backend: provider.activeBackend,
+              totalElapsedMs: Date.now() - startedAt,
+              ...validationDiagnostics(error),
+            });
+            return degradedRegisterCandidate;
+          }
           const switched = provider.switchToFallback?.("quality-retry", { requestId, operation }) ?? false;
           if (!switched) break;
         }
@@ -532,7 +570,10 @@ async function runAiJson<T>(
       }
       if (error instanceof AiProviderError) {
         if (provider.activeBackend !== attemptBackend) continue;
-        if (!error.retryable) throw providerApiError(error);
+        if (!error.retryable) {
+          if (degradedRegisterCandidate !== undefined) return degradedRegisterCandidate;
+          throw providerApiError(error);
+        }
         const transientFailureCount = (transientFailureCounts.get(attemptBackend) ?? 0) + 1;
         transientFailureCounts.set(attemptBackend, transientFailureCount);
         if (transientFailureCount >= MAX_TRANSIENT_FAILURES_PER_PROVIDER) break;
@@ -557,6 +598,7 @@ async function runAiJson<T>(
   }
 
   if (deadlineReached || Date.now() >= deadlineAt) {
+    if (degradedRegisterCandidate !== undefined) return degradedRegisterCandidate;
     console.error("[tarot-ai] response deadline reached", {
       requestId,
       operation,
@@ -571,7 +613,10 @@ async function runAiJson<T>(
       "AI 응답 생성 시간이 너무 길어 요청을 중단했습니다. 현재 상태에서 다시 시도하세요.",
     );
   }
-  if (lastError instanceof AiProviderError) throw providerApiError(lastError);
+  if (lastError instanceof AiProviderError) {
+    if (degradedRegisterCandidate !== undefined) return degradedRegisterCandidate;
+    throw providerApiError(lastError);
+  }
   console.error("[tarot-ai] all responses rejected", {
     requestId,
     operation,
@@ -584,26 +629,18 @@ async function runAiJson<T>(
   throw new ApiError(502, "INVALID_AI_RESPONSE", "AI 응답 형식을 확인하지 못했습니다. 현재 상태를 유지하고 다시 시도하세요.");
 }
 
-function planDisplayFields(plan: ReadingPlan): KoreanDisplayField[] {
+function planDisplaySentences(plan: ReadingPlan): KoreanDisplaySentence[] {
   return [
     { path: "interpretationFrame", text: plan.interpretationFrame },
     { path: "selectionGuide", text: plan.selectionGuide },
-    ...plan.positions.map((position, index) => ({
-      path: `positions.${index}.focus`,
-      text: position.focus,
-    })),
-    ...(plan.answerContract.constraints ?? []).map((text, index) => ({
-      path: `answerContract.constraints.${index}`,
-      text,
-    })),
     ...(plan.answerContract.answerInstruction
       ? [{ path: "answerContract.answerInstruction", text: plan.answerContract.answerInstruction }]
       : []),
   ];
 }
 
-function readingDisplayFields(result: ReadingResult): KoreanDisplayField[] {
-  const fields: KoreanDisplayField[] = [];
+function readingDisplaySentences(result: ReadingResult): KoreanDisplaySentence[] {
+  const fields: KoreanDisplaySentence[] = [];
   if (result.verdict) {
     fields.push({ path: "verdict.statement", text: result.verdict.statement });
   }
@@ -759,7 +796,7 @@ interpretationFrame은 자리 이름을 다시 나열하지 말고, 이번 리�
       { question, language, conversation: context },
     );
     return language === "ko"
-      ? enforceKoreanHaeyoRegister(plan, planDisplayFields(plan))
+      ? enforceKoreanHaeyoRegister(plan, planDisplaySentences(plan))
       : plan;
   }, 1_200, READING_PLAN_JSON_SCHEMA, MAX_AI_ATTEMPTS, 0.2, totalTimeoutMs, requestId);
 }
@@ -927,7 +964,7 @@ ${lengthGuide}를 목표로 하되 카드별 근거, 종합, 행동 기준을 �
       { expectedCards, answerContract: contract },
     );
     return language === "ko"
-      ? enforceKoreanHaeyoRegister(reading, readingDisplayFields(reading))
+      ? enforceKoreanHaeyoRegister(reading, readingDisplaySentences(reading))
       : reading;
   };
   return runAiJson(
