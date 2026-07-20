@@ -160,28 +160,3 @@ export const READING_RESULT_JSON_SCHEMA: AiJsonSchema = {
     },
   },
 };
-
-export const KOREAN_REGISTER_EDIT_JSON_SCHEMA: AiJsonSchema = {
-  name: "korean_register_edit",
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["editedFields"],
-    properties: {
-      editedFields: {
-        type: "array",
-        minItems: 1,
-        maxItems: 40,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["fieldId", "text"],
-          properties: {
-            fieldId: { type: "string", minLength: 1, maxLength: 120 },
-            text: { type: "string", minLength: 1, maxLength: 1800 },
-          },
-        },
-      },
-    },
-  },
-};

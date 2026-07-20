@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  enforceKoreanHaeyoRegister,
   enforcePlanQuality,
   enforceReadingQuality,
   type ExpectedInterpretation,
@@ -203,5 +204,33 @@ describe("domain-neutral interpretation validation", () => {
       expectedCards: [expectedCard],
       answerContract: { kind: "analysis", subject: "새로운 질문", candidates: [] },
     })).toThrow(/되풀이하지 말아야/);
+  });
+});
+
+describe("Korean display register validation", () => {
+  it("accepts natural haeyo sentences without changing them", () => {
+    const result = { summary: "지금은 실행하는 쪽이 좋아요." };
+    expect(enforceKoreanHaeyoRegister(result, [
+      { path: "summary", text: result.summary },
+    ])).toBe(result);
+  });
+
+  it.each([
+    "지금은 실행하는 쪽이 좋습니다.",
+    "지금은 실행하는 쪽이 좋다.",
+    "지금은 실행하라.",
+    "지금은 함께 시작하자.",
+    "다른 선택을 확인하십시오.",
+  ])("rejects a non-haeyo display sentence so the AI can retry: %s", (text) => {
+    expect(() => enforceKoreanHaeyoRegister({}, [
+      { path: "summary", text },
+    ])).toThrow(/자연스러운 해요체/);
+  });
+
+  it("does not reject labels and noun phrases", () => {
+    expect(enforceKoreanHaeyoRegister("same", [
+      { path: "position.title", text: "현재 흐름" },
+      { path: "answerContract.subject", text: "두 선택 중 하나" },
+    ])).toBe("same");
   });
 });
